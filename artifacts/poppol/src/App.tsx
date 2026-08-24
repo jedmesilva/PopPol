@@ -1,541 +1,2154 @@
-import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import {
-  Activity,
-  AlertCircle,
-  ArrowLeft,
-  ArrowUpRight,
-  BarChart3,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Clock3,
-  Globe2,
-  Landmark,
-  MapPin,
-  Menu,
-  MessageSquare,
-  Minus,
-  RefreshCw,
-  Search,
-  Send,
-  ShieldCheck,
-  SlidersHorizontal,
-  ThumbsDown,
-  ThumbsUp,
-  TrendingUp,
-  Users,
-  X,
-} from 'lucide-react';
-import { Link, Route, Switch, useLocation, useParams, Router as WouterRouter } from 'wouter';
-import {
-  getGetOverviewStatsQueryKey,
-  getGetPoliticianQueryKey,
-  getListActivityQueryKey,
-  getListPoliticiansQueryKey,
-  useCreateManifestation,
-  useGetOverviewStats,
-  useGetPolitician,
-  useListActivity,
-  useListPoliticians,
-} from '@workspace/api-client-react';
-import type {
-  ActivityItem,
-  ManifestationItem,
-  Politician,
-  PoliticianProfile,
-} from '@workspace/api-client-react';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { Toaster } from '@/components/ui/toaster';
-import NotFound from '@/pages/not-found';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, Minus, Plus, Loader2, Trash2, LayoutGrid, TrendingUp, TrendingDown } from "lucide-react";
 
-const queryClient = new QueryClient();
+/* ------------------------------------------------------------------
+   PopPol — Popularidade Política — Grid dominante (treemap)
+   Ocupa 100% da viewport, sem scroll. O espaço de cada político é
+   proporcional ao SALDO de relevância que ele recebeu dos usuários:
+   itens de APOIO somam, itens de CRÍTICA subtraem — e cada item tem
+   um peso próprio (um "aceno" pesa pouco, um "repúdio" pesa muito),
+   pra representar que às vezes as pessoas só estão um pouco
+   incomodadas, e às vezes odeiam mesmo. Quanto maior o saldo, maior
+   a célula; quanto mais negativo, menor (nunca desaparece de vez).
+   Pra enviar, o usuário monta uma sacola com os itens e quantidades
+   que quiser (de qualquer um dos dois lados), avança pra um checkout
+   com o valor total e o efeito na relevância, e só ao "pagar"
+   (Pix/cartão simulado) os itens são enviados ao político.
 
-const formatNumber = (value?: number) =>
-  typeof value === 'number' ? new Intl.NumberFormat('pt-BR').format(value) : '—';
+   Dados FICTÍCIOS (países, estados, cidades, nomes), só para ilustrar
+   a interface e a estrutura de filtro.
+------------------------------------------------------------------- */
 
-const formatDate = (value?: string) => {
-  if (!value) return 'Agora';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(date);
+const PARTIES = [
+  { code: "PVC", name: "Partido Verde Cívico", color: "#4ADE80" },
+  { code: "AUP", name: "Aliança da União Popular", color: "#F97316" },
+  { code: "MRN", name: "Movimento Renovação", color: "#38BDF8" },
+  { code: "FDT", name: "Frente Democrática", color: "#F472B6" },
+  { code: "CNP", name: "Congresso Nacional Popular", color: "#A78BFA" },
+];
+
+const FIRST = ["Marina", "Heitor", "Beatriz", "Rogério", "Cecília", "Otávio", "Luiza", "Fábio", "Aline", "Renato", "Débora", "Ivo", "Camila", "Nélson", "Sofia", "Bruno", "Talita", "Gustavo", "Priscila", "Edmar", "Yasmin", "Caio", "Lorena", "Mateus"];
+const LAST = ["Andrade", "Bittencourt", "Cavalcante", "Duarte", "Esteves", "Farias", "Guimarães", "Holanda", "Junqueira", "Lacerda", "Machado", "Nogueira", "Oliveira", "Prado", "Queiroz", "Siqueira", "Teixeira", "Ramalho"];
+
+const ROLES_BY_LEVEL = {
+  municipal: ["Vereador", "Vereadora", "Prefeito", "Prefeita"],
+  estadual: ["Deputado Estadual", "Deputada Estadual", "Governador", "Governadora"],
+  federal: ["Deputado Federal", "Deputada Federal", "Senador", "Senadora"],
+};
+const LEVELS = ["federal", "estadual", "municipal"];
+const LEVEL_LABEL = { federal: "Federal", estadual: "Estadual", municipal: "Municipal" };
+
+
+// Metadados de cada lado da balança. "sign" é o multiplicador aplicado
+// ao peso do item na hora de somar ao saldo de relevância.
+const TYPE_META = {
+  apoio: { label: "Apoio", verb: "Apoiar", color: "#4ADE80", soft: "#4ADE8020", sign: 1 },
+  rejeicao: { label: "Crítica", verb: "Criticar", color: "#E2555F", soft: "#E2555F20", sign: -1 },
 };
 
-const formatRelative = (value?: string) => {
-  if (!value) return 'agora';
-  const delta = Math.max(0, Date.now() - new Date(value).getTime());
-  const hours = Math.floor(delta / 36e5);
-  if (hours < 1) return 'agora há pouco';
-  if (hours < 24) return `há ${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `há ${days}d`;
+// Catálogo de itens. Cada item tem um "value" (peso) — itens leves
+// custam pouco e pesam pouco no saldo (uma testa franzida não é
+// ódio); itens fortes custam mais e pesam muito (um repúdio é uma
+// declaração pesada). Preço em centavos (capital sempre em centavos).
+const ITEMS = [
+  { id: "aceno", type: "apoio", tier: 0, emoji: "👋", label: "Aceno", hint: "reconhecimento leve", value: 1, priceCents: 100 },
+  { id: "aplausos", type: "apoio", tier: 1, emoji: "👏", label: "Aplausos", hint: "aprovação", value: 4, priceCents: 400 },
+  { id: "trofeu", type: "apoio", tier: 2, emoji: "🏆", label: "Troféu", hint: "destaque", value: 12, priceCents: 1200 },
+  { id: "selo", type: "apoio", tier: 3, emoji: "⭐", label: "Selo de confiança", hint: "apoio forte", value: 30, priceCents: 3000 },
+  { id: "testa_franzida", type: "rejeicao", tier: 0, emoji: "😒", label: "Testa franzida", hint: "insatisfação leve", value: 1, priceCents: 100 },
+  { id: "tomate", type: "rejeicao", tier: 1, emoji: "🍅", label: "Tomate", hint: "crítica", value: 4, priceCents: 400 },
+  { id: "cartao_vermelho", type: "rejeicao", tier: 2, emoji: "🟥", label: "Cartão vermelho", hint: "reprovação", value: 12, priceCents: 1200 },
+  { id: "repudio", type: "rejeicao", tier: 3, emoji: "🚫", label: "Repúdio", hint: "rejeição forte", value: 30, priceCents: 3000 },
+];
+const APOIO_ITEMS = ITEMS.filter((it) => it.type === "apoio");
+const REJEICAO_ITEMS = ITEMS.filter((it) => it.type === "rejeicao");
+// Lista única, com itens dos dois lados intercalados por tier — é o
+// que aparece na interface pro usuário, sem separar por rótulo.
+const MIXED_ITEMS = [0, 1, 2, 3].flatMap((tier) => [
+  APOIO_ITEMS.find((it) => it.tier === tier),
+  REJEICAO_ITEMS.find((it) => it.tier === tier),
+]);
+// Categorias neutras (por raridade/tier) usadas no catálogo completo —
+// cada categoria mistura itens dos dois lados, sem nomear "apoio" ou
+// "crítica" em lugar nenhum da interface.
+const CATEGORY_LABELS = ["Itens do dia a dia", "Itens populares", "Itens de destaque", "Itens raros"];
+// Pesos usados só pra gerar a distribuição inicial (fictícia) de itens
+// já recebidos por cada político — na mesma ordem de cada lista acima,
+// itens leves aparecem com muito mais frequência que os pesados.
+const TIER_BASE_WEIGHTS = [40, 25, 10, 4];
+const MIN_CELL_VALUE = 20; // piso pro político nunca sumir do mapa, mesmo com saldo bem negativo
+
+// Estrutura hierárquica de local — País > Estado/Região > Cidade.
+const GEO = {
+  BR: {
+    name: "Brasil",
+    states: {
+      SP: { name: "São Paulo", cities: ["São Paulo", "Campinas", "Santos"] },
+      RJ: { name: "Rio de Janeiro", cities: ["Rio de Janeiro", "Niterói"] },
+      MG: { name: "Minas Gerais", cities: ["Belo Horizonte", "Uberlândia"] },
+      PR: { name: "Paraná", cities: ["Curitiba", "Londrina"] },
+      RS: { name: "Rio Grande do Sul", cities: ["Porto Alegre", "Caxias do Sul"] },
+      BA: { name: "Bahia", cities: ["Salvador", "Feira de Santana"] },
+    },
+  },
+  PT: {
+    name: "Portugal",
+    states: {
+      LIS: { name: "Lisboa", cities: ["Lisboa", "Sintra", "Cascais"] },
+      PRT: { name: "Porto", cities: ["Porto", "Braga"] },
+    },
+  },
+  AR: {
+    name: "Argentina",
+    states: {
+      BSA: { name: "Buenos Aires", cities: ["Buenos Aires", "La Plata"] },
+      COR: { name: "Córdoba", cities: ["Córdoba", "Villa María"] },
+    },
+  },
 };
+const COUNTRY_CODES = Object.keys(GEO);
 
-function Logo() {
-  return (
-    <Link href="/" className="group flex items-center gap-3" data-testid="link-logo">
-      <span className="relative flex h-9 w-9 items-center justify-center rounded-[11px] bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] shadow-[3px_3px_0_hsl(var(--foreground))] transition-transform duration-200 group-hover:-translate-y-0.5">
-        <Landmark size={18} strokeWidth={2.4} />
-        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-[hsl(var(--sidebar))] bg-[hsl(var(--primary))]" />
-      </span>
-      <span className="font-mono-civic text-[15px] font-medium tracking-[0.16em] text-current">POPPOL</span>
-    </Link>
-  );
-}
-
-function AppShell({ children }: { children: ReactNode }) {
-  const [location] = useLocation();
-  const [mobileNav, setMobileNav] = useState(false);
-  const navItems = [
-    { href: '/', label: 'Descobrir', icon: Search },
-    { href: '/#activity', label: 'Praça pública', icon: Activity },
-  ];
-
-  return (
-    <div className="noise min-h-[100dvh] bg-[hsl(var(--background))]">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col justify-between bg-[hsl(var(--sidebar))] px-6 py-7 text-[hsl(var(--sidebar-foreground))] md:flex">
-        <div>
-          <Logo />
-          <div className="mt-16">
-            <p className="font-mono-civic text-[10px] uppercase tracking-[0.2em] text-[hsl(var(--sidebar-foreground)/.45)]">Navegação</p>
-            <nav className="mt-4 space-y-1" aria-label="Navegação principal">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const active = item.href === '/' && location === '/';
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-colors ${active ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]' : 'text-[hsl(var(--sidebar-foreground)/.62)] hover:bg-[hsl(var(--sidebar-accent)/.65)] hover:text-[hsl(var(--sidebar-foreground))]'}`}
-                    data-testid={`link-nav-${item.label.toLowerCase().replaceAll(' ', '-')}`}
-                  >
-                    <Icon size={17} strokeWidth={active ? 2.4 : 1.8} />
-                    <span>{item.label}</span>
-                    {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[hsl(var(--accent))]" />}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
-          <div className="mt-14 rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar-accent)/.35)] p-4">
-            <div className="flex items-center gap-2 text-[hsl(var(--sidebar-primary))]">
-              <ShieldCheck size={15} />
-              <span className="font-mono-civic text-[10px] uppercase tracking-[0.14em]">Transparência</span>
-            </div>
-            <p className="mt-3 text-xs leading-5 text-[hsl(var(--sidebar-foreground)/.65)]">
-              Cada manifestação é pública, contextualizada e ligada a uma pessoa real.
-            </p>
-          </div>
-        </div>
-        <div className="border-t border-[hsl(var(--sidebar-border))] pt-4">
-          <p className="font-mono-civic text-[10px] uppercase tracking-[0.14em] text-[hsl(var(--sidebar-foreground)/.38)]">PopPol / 2024</p>
-          <p className="mt-2 text-xs text-[hsl(var(--sidebar-foreground)/.54)]">Participar é acompanhar.</p>
-        </div>
-      </aside>
-
-      <div className="md:pl-64">
-        <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-[hsl(var(--border)/.75)] bg-[hsl(var(--background)/.9)] px-5 backdrop-blur-xl md:hidden">
-          <Logo />
-          <button
-            type="button"
-            onClick={() => setMobileNav((open) => !open)}
-            className="rounded-lg p-2 text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
-            aria-label="Abrir navegação"
-            data-testid="button-toggle-navigation"
-          >
-            {mobileNav ? <X size={21} /> : <Menu size={21} />}
-          </button>
-        </header>
-        {mobileNav && (
-          <nav className="absolute left-0 right-0 z-20 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 shadow-lg md:hidden" aria-label="Navegação móvel">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link key={item.href} href={item.href} onClick={() => setMobileNav(false)} className="flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold hover:bg-[hsl(var(--muted))]" data-testid={`link-mobile-${item.label.toLowerCase().replaceAll(' ', '-')}`}>
-                  <Icon size={17} /> {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        )}
-        <main className="min-h-[calc(100dvh-72px)]">{children}</main>
-      </div>
-    </div>
-  );
-}
-
-function PageHeader({ eyebrow, title, description, children }: { eyebrow: string; title: ReactNode; description?: string; children?: ReactNode }) {
-  return (
-    <div className="border-b border-[hsl(var(--border)/.8)] px-5 pb-8 pt-9 md:px-10 md:pb-10 md:pt-12">
-      <div className="mx-auto flex max-w-[1320px] flex-col justify-between gap-7 lg:flex-row lg:items-end">
-        <div className="animate-enter">
-          <p className="font-mono-civic text-[10px] font-medium uppercase tracking-[0.22em] text-[hsl(var(--primary))]">{eyebrow}</p>
-          <h1 className="mt-3 max-w-3xl font-display text-[clamp(2.6rem,5vw,5.2rem)] leading-[.91] tracking-[-.045em] text-[hsl(var(--foreground))]">{title}</h1>
-          {description && <p className="mt-5 max-w-xl text-sm leading-6 text-[hsl(var(--muted-foreground))]">{description}</p>}
-        </div>
-        {children && <div className="animate-enter-delay">{children}</div>}
-      </div>
-    </div>
-  );
-}
-
-function LoadingBlock({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-xl bg-[hsl(var(--muted))] ${className}`} aria-label="Carregando" data-testid="status-loading" />;
-}
-
-function ErrorState({ onRetry, compact = false }: { onRetry: () => void; compact?: boolean }) {
-  return (
-    <div className={`flex items-center ${compact ? 'gap-3 py-7' : 'min-h-44 flex-col justify-center gap-4 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 text-center'}`} data-testid="status-error">
-      <AlertCircle size={compact ? 17 : 22} className="text-[hsl(var(--accent))]" />
-      <p className="text-sm text-[hsl(var(--muted-foreground))]">Não conseguimos atualizar esta parte da praça.</p>
-      <button type="button" onClick={onRetry} className="inline-flex items-center gap-2 rounded-lg border border-[hsl(var(--border))] px-3 py-2 text-xs font-bold hover:bg-[hsl(var(--muted))]" data-testid="button-retry">
-        <RefreshCw size={13} /> Tentar novamente
-      </button>
-    </div>
-  );
-}
-
-function StatCard({ label, value, detail, icon: Icon, accent = 'primary', loading = false }: { label: string; value?: string | number; detail: string; icon: typeof Users; accent?: 'primary' | 'accent'; loading?: boolean }) {
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-card)]" data-testid={`stat-${label.toLowerCase().replaceAll(' ', '-')}`}>
-      <div className={`absolute right-0 top-0 h-16 w-16 rounded-bl-[44px] ${accent === 'accent' ? 'bg-[hsl(var(--accent)/.12)]' : 'bg-[hsl(var(--primary)/.1)]'}`} />
-      <div className="relative flex items-start justify-between">
-        <span className="font-mono-civic text-[10px] uppercase tracking-[0.15em] text-[hsl(var(--muted-foreground))]">{label}</span>
-        <Icon size={17} className={accent === 'accent' ? 'text-[hsl(var(--accent))]' : 'text-[hsl(var(--primary))]'} />
-      </div>
-      {loading ? <LoadingBlock className="mt-4 h-9 w-24" /> : <p className="relative mt-3 font-display text-4xl tracking-[-.04em]" data-testid={`value-${label.toLowerCase().replaceAll(' ', '-')}`}>{value}</p>}
-      <p className="relative mt-2 text-xs text-[hsl(var(--muted-foreground))]">{detail}</p>
-    </div>
-  );
-}
-
-function ScoreRing({ score, large = false }: { score: number; large?: boolean }) {
-  const safeScore = Math.max(0, Math.min(100, score || 0));
-  return (
-    <div className={`relative flex shrink-0 items-center justify-center rounded-full ${large ? 'h-28 w-28' : 'h-[68px] w-[68px]'}`} style={{ background: `conic-gradient(hsl(var(--primary)) ${safeScore}%, hsl(var(--muted)) 0)` }} data-testid="display-score-ring">
-      <div className={`flex items-center justify-center rounded-full bg-[hsl(var(--card))] ${large ? 'h-[88px] w-[88px]' : 'h-[54px] w-[54px]'}`}>
-        <span className={`font-mono-civic font-medium ${large ? 'text-2xl' : 'text-base'}`}>{Math.round(safeScore)}</span>
-      </div>
-    </div>
-  );
-}
-
-function PartyPill({ party }: { party: Politician['party'] }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--background)/.7)] px-2.5 py-1 font-mono-civic text-[10px] uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]" data-testid={`badge-party-${party.code}`}>
-      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: party.color }} />
-      {party.code}
-    </span>
-  );
-}
-
-function PoliticianCard({ politician, index }: { politician: Politician; index: number }) {
-  const isPositive = politician.trend >= 0;
-  return (
-    <Link href={`/politicians/${politician.id}`} className="hover-lift group relative block overflow-hidden rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-card)]" data-testid={`card-politician-${politician.id}`}>
-      <div className="absolute -right-5 -top-8 font-display text-[8rem] leading-none text-[hsl(var(--muted)/.62)] transition-transform duration-500 group-hover:translate-x-1 group-hover:-translate-y-1">{String(index + 1).padStart(2, '0')}</div>
-      <div className="relative flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-[15px] bg-[hsl(var(--primary)/.12)] font-mono-civic text-xs font-medium text-[hsl(var(--primary))]" data-testid={`avatar-politician-${politician.id}`}>{politician.initials}</div>
-          <div>
-            <h3 className="max-w-[190px] truncate text-base font-extrabold tracking-[-.02em]">{politician.name}</h3>
-            <p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">{politician.role}</p>
-          </div>
-        </div>
-        <ArrowUpRight size={18} className="text-[hsl(var(--muted-foreground)/.6)] transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-[hsl(var(--accent))]" />
-      </div>
-      <div className="relative mt-7 flex items-end justify-between border-t border-[hsl(var(--border)/.8)] pt-4">
-        <div>
-          <div className="flex items-center gap-2"><PartyPill party={politician.party} /><span className="text-[11px] text-[hsl(var(--muted-foreground))]">{politician.region}</span></div>
-          <div className="mt-4 flex items-center gap-2 text-xs">
-            <span className={`font-mono-civic ${isPositive ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--accent))]'}`}>{isPositive ? '+' : ''}{politician.trend.toFixed(1)}%</span>
-            {isPositive ? <TrendingUp size={13} className="text-[hsl(var(--primary))]" /> : <Minus size={13} className="text-[hsl(var(--accent))]" />}
-            <span className="text-[hsl(var(--muted-foreground))]">no último mês</span>
-          </div>
-        </div>
-        <ScoreRing score={politician.score} />
-      </div>
-    </Link>
-  );
-}
-
-function ActivityRow({ activity, compact = false }: { activity: ActivityItem; compact?: boolean }) {
-  const positive = activity.kind === 'apoio';
-  return (
-    <Link href={`/politicians/${activity.politicianId}`} className="group flex items-center gap-3 border-b border-[hsl(var(--border)/.75)] py-3.5 last:border-0" data-testid={`activity-${activity.id}`}>
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${positive ? 'bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]' : 'bg-[hsl(var(--accent)/.12)] text-[hsl(var(--accent))]'}`}>
-        {positive ? <ThumbsUp size={15} /> : <ThumbsDown size={15} />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-bold text-[hsl(var(--foreground))]">{activity.itemLabel}</p>
-        <p className="mt-1 truncate text-[11px] text-[hsl(var(--muted-foreground))]">{activity.politicianName} {compact ? '' : `· ${activity.region}`}</p>
-      </div>
-      <span className="shrink-0 font-mono-civic text-[10px] text-[hsl(var(--muted-foreground))]">{formatRelative(activity.createdAt)}</span>
-    </Link>
-  );
-}
-
-function Home() {
-  const [search, setSearch] = useState('');
-  const [level, setLevel] = useState('');
-  const [region, setRegion] = useState('');
-  const [sort, setSort] = useState('relevancia');
-  const params = useMemo(() => ({
-    q: search || undefined,
-    level: (level || undefined) as 'federal' | 'estadual' | 'municipal' | undefined,
-    region: region || undefined,
-    sort: sort as 'relevancia' | 'apoio' | 'critica',
-  }), [search, level, region, sort]);
-  const politiciansQuery = useListPoliticians(params, { query: { queryKey: getListPoliticiansQueryKey(params), staleTime: 30_000 } });
-  const activityQuery = useListActivity({ query: { queryKey: getListActivityQueryKey(), staleTime: 30_000 } });
-  const statsQuery = useGetOverviewStats({ query: { queryKey: getGetOverviewStatsQueryKey(), staleTime: 30_000 } });
-  const politicians = politiciansQuery.data ?? [];
-  const activity = activityQuery.data ?? [];
-  const stats = statsQuery.data;
-
-  return (
-    <AppShell>
-      <PageHeader eyebrow="Observatório cidadão / ao vivo" title={<>O poder público,<br /><em className="text-[hsl(var(--accent))]">sem filtro.</em></>} description="Descubra quem decide, entenda o contexto e deixe sua posição registrada. A praça pública é de todos.">
-        <div className="flex items-center gap-2 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card)/.7)] px-3 py-2.5 shadow-sm">
-          <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-[pulse-dot_2s_infinite] rounded-full bg-[hsl(var(--primary))]" /><span className="relative inline-flex h-2 w-2 rounded-full bg-[hsl(var(--primary))]" /></span>
-          <span className="font-mono-civic text-[10px] uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">dados atualizados agora</span>
-        </div>
-      </PageHeader>
-
-      <div className="mx-auto max-w-[1320px] px-5 py-7 md:px-10 md:py-10">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-          <StatCard label="Representantes" value={formatNumber(stats?.totalPoliticians)} detail="monitorados na plataforma" icon={Users} loading={statsQuery.isLoading} />
-          <StatCard label="Manifestações" value={formatNumber(stats?.totalManifestations)} detail="posições públicas registradas" icon={MessageSquare} accent="accent" loading={statsQuery.isLoading} />
-          <StatCard label="Regiões ativas" value={formatNumber(stats?.activeRegions)} detail="com participação recente" icon={Globe2} loading={statsQuery.isLoading} />
-          <StatCard label="Apoio geral" value={stats ? `${stats.supportPercentage.toFixed(1)}%` : '—'} detail="do sentimento manifestado" icon={TrendingUp} accent="accent" loading={statsQuery.isLoading} />
-        </div>
-        {statsQuery.isError && <ErrorState onRetry={() => statsQuery.refetch()} compact />}
-
-        <section className="mt-14" aria-labelledby="discover-heading">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div>
-              <p className="font-mono-civic text-[10px] uppercase tracking-[.2em] text-[hsl(var(--primary))]">01 / Mapa de poder</p>
-              <h2 id="discover-heading" className="mt-2 font-display text-4xl tracking-[-.04em]">Quem está no radar</h2>
-            </div>
-            <span className="font-mono-civic text-[10px] uppercase tracking-[.12em] text-[hsl(var(--muted-foreground))]">{politicians.length ? `${politicians.length} resultados` : 'busque para começar'}</span>
-          </div>
-          <div className="mt-6 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card)/.6)] p-3 shadow-sm md:p-4">
-            <div className="grid gap-3 md:grid-cols-[minmax(220px,1.8fr)_1fr_1fr_1fr]">
-              <label className="relative block">
-                <span className="sr-only">Buscar político</span>
-                <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou cargo" className="h-11 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] pl-10 pr-3 text-sm outline-none transition-colors placeholder:text-[hsl(var(--muted-foreground)/.7)] focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary)/.12)]" data-testid="input-search-politicians" />
-              </label>
-              <label className="relative">
-                <span className="sr-only">Nível de governo</span>
-                <select value={level} onChange={(event) => setLevel(event.target.value)} className="h-11 w-full appearance-none rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] px-3 text-sm outline-none focus:border-[hsl(var(--primary))]" data-testid="select-level">
-                  <option value="">Todos os níveis</option><option value="federal">Federal</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option>
-                </select>
-                <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
-              </label>
-              <label className="relative">
-                <span className="sr-only">Região</span>
-                <MapPin size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
-                <input value={region} onChange={(event) => setRegion(event.target.value)} placeholder="Região" className="h-11 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] pl-9 pr-3 text-sm outline-none focus:border-[hsl(var(--primary))]" data-testid="input-region" />
-              </label>
-              <label className="relative">
-                <span className="sr-only">Ordenar resultados</span>
-                <SlidersHorizontal size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
-                <select value={sort} onChange={(event) => setSort(event.target.value)} className="h-11 w-full appearance-none rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] pl-9 pr-8 text-sm outline-none focus:border-[hsl(var(--primary))]" data-testid="select-sort">
-                  <option value="relevancia">Mais relevantes</option><option value="apoio">Mais apoiados</option><option value="critica">Mais criticados</option>
-                </select>
-                <ChevronDown size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
-              </label>
-            </div>
-          </div>
-
-          {politiciansQuery.isLoading ? (
-            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{[1, 2, 3, 4, 5, 6].map((item) => <LoadingBlock key={item} className="h-56" />)}</div>
-          ) : politiciansQuery.isError ? <div className="mt-5"><ErrorState onRetry={() => politiciansQuery.refetch()} /></div>
-            : politicians.length === 0 ? (
-              <div className="mt-5 flex flex-col items-center justify-center rounded-2xl border border-dashed border-[hsl(var(--border))] bg-[hsl(var(--card)/.5)] px-6 py-16 text-center" data-testid="empty-politicians">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]"><Search size={20} /></div>
-                <h3 className="mt-4 font-display text-2xl">Nada apareceu ainda</h3>
-                <p className="mt-2 max-w-sm text-sm text-[hsl(var(--muted-foreground))]">Tente remover um filtro ou buscar por outro nome.</p>
-                <button type="button" onClick={() => { setSearch(''); setLevel(''); setRegion(''); }} className="mt-5 rounded-lg bg-[hsl(var(--primary))] px-4 py-2.5 text-xs font-bold text-[hsl(var(--primary-foreground))]" data-testid="button-clear-filters">Limpar filtros</button>
-              </div>
-            ) : <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{politicians.map((politician, index) => <PoliticianCard key={politician.id} politician={politician} index={index} />)}</div>}
-        </section>
-
-        <section id="activity" className="mt-16 grid gap-7 border-t border-[hsl(var(--border))] pt-10 lg:grid-cols-[1.3fr_.7fr]" aria-labelledby="activity-heading">
-          <div>
-            <div className="flex items-end justify-between">
-              <div><p className="font-mono-civic text-[10px] uppercase tracking-[.2em] text-[hsl(var(--accent))]">02 / Pulso recente</p><h2 id="activity-heading" className="mt-2 font-display text-4xl tracking-[-.04em]">O que está sendo dito</h2></div>
-              <Activity size={22} className="text-[hsl(var(--accent))]" />
-            </div>
-            <div className="mt-5 rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-5 shadow-[var(--shadow-card)]">
-              {activityQuery.isLoading ? <div className="space-y-2 py-5"><LoadingBlock className="h-12" /><LoadingBlock className="h-12" /><LoadingBlock className="h-12" /></div>
-                : activityQuery.isError ? <ErrorState onRetry={() => activityQuery.refetch()} compact />
-                  : activity.length === 0 ? <div className="py-12 text-center" data-testid="empty-activity"><Clock3 className="mx-auto text-[hsl(var(--muted-foreground))]" /><p className="mt-3 text-sm text-[hsl(var(--muted-foreground))]">A praça ainda está silenciosa.</p></div>
-                    : activity.slice(0, 6).map((item) => <ActivityRow key={item.id} activity={item} />)}
-            </div>
-          </div>
-          <div className="relative overflow-hidden rounded-2xl bg-[hsl(var(--foreground))] p-7 text-[hsl(var(--background))]">
-            <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full border-[18px] border-[hsl(var(--accent)/.8)]" />
-            <div className="absolute bottom-5 right-8 h-3 w-3 rounded-full bg-[hsl(var(--primary))]" />
-            <BarChart3 size={20} className="text-[hsl(var(--primary))]" />
-            <h3 className="mt-16 max-w-[220px] font-display text-3xl leading-none tracking-[-.035em]">Contexto antes de opinião.</h3>
-            <p className="mt-4 max-w-[250px] text-sm leading-6 text-[hsl(var(--background)/.65)]">Compare níveis, regiões e histórico antes de formar seu ponto de vista.</p>
-            <div className="mt-8 flex items-center gap-2 font-mono-civic text-[10px] uppercase tracking-[.14em] text-[hsl(var(--primary))]"><span className="h-px w-7 bg-[hsl(var(--primary))]" /> explore a praça</div>
-          </div>
-        </section>
-      </div>
-    </AppShell>
-  );
-}
-
-function SentimentBar({ support, criticism }: { support: number; criticism: number }) {
-  const total = Math.max(1, (support || 0) + (criticism || 0));
-  const supportPct = (support / total) * 100;
-  return (
-    <div>
-      <div className="flex h-3 overflow-hidden rounded-full bg-[hsl(var(--accent)/.16)]" aria-label="Distribuição de sentimento" data-testid="display-sentiment-bar">
-        <div className="bg-[hsl(var(--primary))] transition-all duration-700" style={{ width: `${supportPct}%` }} />
-      </div>
-      <div className="mt-3 flex justify-between text-xs">
-        <span className="flex items-center gap-2 font-semibold text-[hsl(var(--primary))]"><span className="h-2 w-2 rounded-full bg-[hsl(var(--primary))]" /> Apoio <b>{formatNumber(support)}</b></span>
-        <span className="flex items-center gap-2 font-semibold text-[hsl(var(--accent))]"><b>{formatNumber(criticism)}</b> Crítica <span className="h-2 w-2 rounded-full bg-[hsl(var(--accent))]" /></span>
-      </div>
-    </div>
-  );
-}
-
-function ManifestationPanel({ profile, onClose, onSuccess }: { profile: PoliticianProfile; onClose: () => void; onSuccess: () => void }) {
-  const [itemId, setItemId] = useState('');
-  const [note, setNote] = useState('');
-  const manifestation = useCreateManifestation();
-  const selected = profile.items.find((item) => item.id === itemId);
-  const positiveItems = profile.items.filter((item) => item.kind === 'apoio');
-  const criticalItems = profile.items.filter((item) => item.kind === 'critica');
-  const submit = () => {
-    if (!itemId || manifestation.isPending) return;
-    manifestation.mutate({ id: profile.id, data: { itemId, note: note.trim() || null } }, { onSuccess: () => { onSuccess(); onClose(); } });
+function seededRandom(seed) {
+  let s = seed;
+  return () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
   };
-  const ItemChoice = ({ item }: { item: ManifestationItem }) => {
-    const positive = item.kind === 'apoio';
-    const active = item.id === itemId;
+}
+function pick(rnd, arr) {
+  return arr[Math.floor(rnd() * arr.length)];
+}
+function hashSeed(seed) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return hash;
+}
+function sumValues(obj) {
+  return Object.values(obj || {}).reduce((a, b) => a + b, 0);
+}
+
+// Saldo de relevância: soma o peso de cada item de apoio e subtrai o
+// peso de cada item de crítica. É esse número que decide o tamanho
+// da célula no mapa (com um piso mínimo pra nunca sumir de vez).
+function netScoreOf(byItem) {
+  let s = 0;
+  for (const it of ITEMS) {
+    const qty = byItem?.[it.id] || 0;
+    s += TYPE_META[it.type].sign * it.value * qty;
+  }
+  return s;
+}
+// Totais "brutos" (sem cancelar um lado com o outro) — usado pra
+// desenhar a barra de aprovação e as prateleiras do modal.
+function weightedTotalsOf(byItem) {
+  let apoio = 0,
+    rejeicao = 0;
+  for (const it of ITEMS) {
+    const qty = byItem?.[it.id] || 0;
+    if (it.type === "apoio") apoio += it.value * qty;
+    else rejeicao += it.value * qty;
+  }
+  return { apoio, rejeicao };
+}
+
+// Distribui um total de itens "já recebidos" entre os itens de uma
+// lista (só apoio ou só rejeição), respeitando pesos de raridade
+// (itens leves são mais comuns) com jitter por político.
+function distributeBase(rnd, total, items) {
+  const jittered = items.map((_, i) => (TIER_BASE_WEIGHTS[i] ?? 1) * (0.65 + rnd() * 0.7));
+  const sumW = jittered.reduce((a, b) => a + b, 0) || 1;
+  const dist = {};
+  items.forEach((item, i) => {
+    dist[item.id] = Math.max(0, Math.round((jittered[i] / sumW) * total));
+  });
+  return dist;
+}
+
+function buildPoliticians(count = 26) {
+  const rnd = seededRandom(11);
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    const first = pick(rnd, FIRST);
+    const last = pick(rnd, LAST);
+    const party = pick(rnd, PARTIES);
+    const level = pick(rnd, LEVELS);
+    const role = pick(rnd, ROLES_BY_LEVEL[level]);
+
+    const countryCode = pick(rnd, COUNTRY_CODES);
+    const country = GEO[countryCode];
+    const stateCodes = Object.keys(country.states);
+    const stateCode = pick(rnd, stateCodes);
+    const state = country.states[stateCode];
+    const city = level === "municipal" ? pick(rnd, state.cities) : null;
+
+    // totalAttention = quantos itens (dos dois lados, somados) esse
+    // político já recebeu antes do usuário interagir. "leaning" decide
+    // se a maior parte disso foi apoio ou crítica — puxado levemente
+    // pros extremos, pra ter tanto queridinhos quanto rejeitados.
+    const raw = Math.pow(rnd(), 2.3);
+    const totalAttention = Math.round(6 + raw * 860);
+    const leanRaw = rnd() * 2 - 1;
+    const leaning = Math.sign(leanRaw) * Math.pow(Math.abs(leanRaw), 0.75);
+    const apoioShare = (leaning + 1) / 2;
+    const apoioTotal = Math.round(totalAttention * apoioShare);
+    const rejeicaoTotal = totalAttention - apoioTotal;
+
+    const baseByItem = {
+      ...distributeBase(rnd, apoioTotal, APOIO_ITEMS),
+      ...distributeBase(rnd, rejeicaoTotal, REJEICAO_ITEMS),
+    };
+
+    list.push({
+      id: `${i}-${first}-${last}`,
+      name: `${first} ${last}`,
+      role,
+      level,
+      countryCode,
+      countryName: country.name,
+      stateCode,
+      stateName: state.name,
+      city,
+      party,
+      baseByItem,
+      initials: `${first[0]}${last[0]}`,
+    });
+  }
+  return list;
+}
+
+function locationLabel(p) {
+  if (p.level === "municipal") return `${p.city}, ${p.stateName} — ${p.countryName}`;
+  return `${p.stateName} — ${p.countryName}`;
+}
+
+function formatCount(n) {
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(".0", "")}mil`;
+  return `${n}`;
+}
+// Como formatCount, mas com sinal — pra saldo de relevância, que pode
+// ser negativo (mais crítica que apoio).
+function formatScore(n) {
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  const abs = Math.abs(n);
+  return `${sign}${formatCount(abs)}`;
+}
+// Efeito de um item na popularidade, em forma de sigla de jogo — mais
+// claro que um número com sinal solto (evita parecer erro de preço).
+function formatEffect(item) {
+  return `${TYPE_META[item.type].sign > 0 ? "DEF" : "ATQ"} ${item.value}`;
+}
+
+function formatBRL(cents) {
+  const value = (cents / 100).toFixed(2).replace(".", ",");
+  const [intPart, decPart] = value.split(",");
+  const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `R$ ${withThousands},${decPart}`;
+}
+
+const AVATAR_BG = ["F59E0B", "38BDF8", "4ADE80", "F472B6", "A78BFA", "FB7185", "22D3EE", "FBBF24"];
+function avatarBg(seed) {
+  return AVATAR_BG[hashSeed(seed) % AVATAR_BG.length];
+}
+function avatarDataUri(seed, initials) {
+  const bg = avatarBg(seed);
+  const h = hashSeed(seed);
+  const shift = 60 + (h % 30);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+      <rect width="200" height="200" fill="#${bg}"/>
+      <rect width="200" height="200" fill="#000000" opacity="0.08"/>
+      <circle cx="100" cy="82" r="40" fill="#ffffff" opacity="0.92"/>
+      <path d="M30 200 Q100 ${shift} 170 200 Z" fill="#ffffff" opacity="0.92"/>
+      <text x="100" y="94" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="700" fill="#${bg}" text-anchor="middle">${initials}</text>
+    </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+// Versão retrato (mais alta que larga), usada no cartão grande do modal
+// de detalhe — o mesmo estilo das células do grid, só que "sangrando"
+// para preencher todo o topo do cartão em vez de caber num círculo.
+function cardPortraitDataUri(seed, initials) {
+  const bg = avatarBg(seed);
+  const h = hashSeed(seed);
+  const shift = 70 + (h % 40);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400">
+      <defs>
+        <radialGradient id="g" cx="50%" cy="28%" r="80%">
+          <stop offset="0%" stop-color="#${bg}" stop-opacity="1"/>
+          <stop offset="100%" stop-color="#${bg}" stop-opacity="0.7"/>
+        </radialGradient>
+      </defs>
+      <rect width="300" height="400" fill="url(#g)"/>
+      <rect width="300" height="400" fill="#000000" opacity="0.10"/>
+      <circle cx="150" cy="150" r="78" fill="#ffffff" opacity="0.92"/>
+      <path d="M14 400 Q150 ${shift + 130} 286 400 Z" fill="#ffffff" opacity="0.92"/>
+      <text x="150" y="165" font-family="Georgia, 'Times New Roman', serif" font-size="56" font-weight="700" fill="#${bg}" text-anchor="middle">${initials}</text>
+    </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/* --------------------- algoritmo de treemap (squarified) --------------------- */
+
+function worstRatio(row, side) {
+  const sum = row.reduce((s, r) => s + r.value, 0);
+  const thickness = sum / side;
+  let worst = 0;
+  for (const it of row) {
+    const length = it.value / thickness;
+    const ratio = Math.max(thickness / length, length / thickness);
+    if (ratio > worst) worst = ratio;
+  }
+  return worst;
+}
+
+function squarify(items, x, y, w, h) {
+  const result = [];
+  let remaining = items.slice();
+  let rx = x,
+    ry = y,
+    rw = w,
+    rh = h;
+
+  while (remaining.length > 0) {
+    if (rw <= 0 || rh <= 0) {
+      for (const it of remaining) result.push({ item: it.item, x: rx, y: ry, w: Math.max(rw, 0), h: Math.max(rh, 0) });
+      break;
+    }
+    const side = Math.min(rw, rh);
+    let row = [remaining[0]];
+    let bestRatio = worstRatio(row, side);
+    let i = 1;
+    while (i < remaining.length) {
+      const testRow = row.concat(remaining[i]);
+      const testRatio = worstRatio(testRow, side);
+      if (testRatio <= bestRatio) {
+        row = testRow;
+        bestRatio = testRatio;
+        i++;
+      } else {
+        break;
+      }
+    }
+
+    const rowSum = row.reduce((s, r) => s + r.value, 0);
+    const thickness = rowSum / side;
+    let offset = 0;
+
+    if (rw >= rh) {
+      for (const it of row) {
+        const itemH = (it.value / rowSum) * rh;
+        result.push({ item: it.item, x: rx, y: ry + offset, w: thickness, h: itemH });
+        offset += itemH;
+      }
+      rx += thickness;
+      rw -= thickness;
+    } else {
+      for (const it of row) {
+        const itemW = (it.value / rowSum) * rw;
+        result.push({ item: it.item, x: rx + offset, y: ry, w: itemW, h: thickness });
+        offset += itemW;
+      }
+      ry += thickness;
+      rh -= thickness;
+    }
+    remaining = remaining.slice(row.length);
+  }
+  return result;
+}
+
+function computeTreemap(politicians, width, height) {
+  if (!politicians.length || width <= 0 || height <= 0) return [];
+  // O valor que define o tamanho de cada célula é o SALDO de
+  // relevância (apoio menos crítica, ponderado pelo peso de cada
+  // item), nunca abaixo de um piso mínimo — só pra continuar visível.
+  const sorted = [...politicians].sort((a, b) => b.netScore - a.netScore);
+  const total = sorted.reduce((s, p) => s + Math.max(p.netScore, MIN_CELL_VALUE), 0);
+  const area = width * height;
+  const scale = area / total;
+  const items = sorted.map((p) => ({ item: p, value: Math.max(Math.max(p.netScore, MIN_CELL_VALUE) * scale, 1) }));
+  return squarify(items, 0, 0, width, height);
+}
+
+/* --------------------------------- UI --------------------------------- */
+
+function TreemapCell({ rect, gap, onClick }) {
+  const p = rect.item;
+  const w = rect.w - gap;
+  const h = rect.h - gap;
+  if (w <= 0 || h <= 0) return null;
+
+  const scaleFactor = Math.min(1.6, Math.max(0.5, Math.sqrt(w * h) / 200));
+  const dominant = w > 240 && h > 190;
+  const tooSmall = w < 56 || h < 56;
+  const sentimentColor = p.netScore >= 0 ? TYPE_META.apoio.color : TYPE_META.rejeicao.color;
+
+  return (
+    <button
+      onClick={onClick}
+      title={`${p.name} — ${p.role} — saldo ${formatScore(p.netScore)}`}
+      style={{
+        position: "absolute",
+        left: rect.x + gap / 2,
+        top: rect.y + gap / 2,
+        width: w,
+        height: h,
+        borderRadius: 0,
+        overflow: "hidden",
+        cursor: "pointer",
+        padding: 0,
+        border: "none",
+        boxSizing: "border-box",
+        boxShadow: dominant ? "0 12px 40px rgba(0,0,0,0.45)" : "none",
+      }}
+    >
+      <img
+        src={avatarDataUri(p.id, p.initials)}
+        alt={p.name}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+      />
+
+      {!tooSmall && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "flex-end",
+            padding: dominant ? "20px 20px" : "10px 12px",
+            background: dominant
+              ? "linear-gradient(180deg, rgba(0,0,0,0) 32%, rgba(0,0,0,0.82) 100%)"
+              : "linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.78) 100%)",
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ textAlign: "left", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+              <div
+                style={{
+                  fontFamily: "'Inter', sans-serif",
+                  fontWeight: 600,
+                  color: "#FFFFFF",
+                  lineHeight: 1.15,
+                  fontSize: Math.round(15 * scaleFactor),
+                  marginBottom: dominant ? 2 : 0,
+                  textShadow: "0 2px 8px rgba(0,0,0,0.5)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth: w - (dominant ? 90 : 24),
+                }}
+              >
+                {p.name}
+              </div>
+              {dominant && (
+                <span
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: sentimentColor,
+                    flexShrink: 0,
+                    textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  {formatScore(p.netScore)}
+                </span>
+              )}
+            </div>
+            {dominant && (
+              <>
+                <div
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: Math.max(10, Math.round(11.5 * scaleFactor)),
+                    color: "#D8D6CF",
+                    marginBottom: 4,
+                  }}
+                >
+                  {p.role} · {LEVEL_LABEL[p.level]}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: Math.max(9, Math.round(10.5 * scaleFactor)),
+                    color: "#9096A6",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <MapPin size={11} strokeWidth={2} />
+                  {locationLabel(p)}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </button>
+  );
+}
+
+function LevelChip({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontFamily: "'Inter', sans-serif",
+        fontSize: 12.5,
+        fontWeight: 600,
+        padding: "7px 13px",
+        borderRadius: 999,
+        border: `1px solid ${active ? "#F5B942" : "#2A2E3A"}`,
+        background: active ? "#F5B94222" : "#1F2330",
+        color: active ? "#F5B942" : "#D8D6CF",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function GeoSelect({ label, value, onChange, disabled, options }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div
+        style={{
+          fontFamily: "'Inter', sans-serif",
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: "#6B7180",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          marginBottom: 5,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ position: "relative" }}>
+        <select
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            width: "100%",
+            appearance: "none",
+            background: disabled ? "#171922" : "#1F2330",
+            border: "1px solid #2A2E3A",
+            borderRadius: 10,
+            padding: "10px 30px 10px 12px",
+            color: disabled ? "#565B68" : "#EDEBE4",
+            fontSize: 13,
+            fontFamily: "'Inter', sans-serif",
+            outline: "none",
+            cursor: disabled ? "not-allowed" : "pointer",
+            boxSizing: "border-box",
+          }}
+        >
+          <option value="">Todos</option>
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={14}
+          style={{
+            position: "absolute",
+            right: 10,
+            top: "50%",
+            transform: "translateY(-50%)",
+            color: "#6B7180",
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function FilterSheet({
+  query,
+  setQuery,
+  country,
+  setCountry,
+  state,
+  setState,
+  city,
+  setCity,
+  level,
+  setLevel,
+  resultCount,
+  onClose,
+  onClear,
+}) {
+  const stateOptions = country
+    ? Object.entries(GEO[country].states).map(([code, s]) => ({ value: code, label: s.name }))
+    : [];
+  const cityOptions = country && state ? GEO[country].states[state].cities.map((c) => ({ value: c, label: c })) : [];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.72)" }} />
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 480,
+          margin: "0 auto",
+          maxHeight: "85vh",
+          overflowY: "auto",
+          background: "#181B24",
+          borderTop: "1px solid #2A2E3A",
+          borderRadius: "22px 22px 0 0",
+          padding: "18px 20px 26px",
+          animation: "poppol-sheet-up 220ms ease",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 600, color: "#EDEBE4" }}>
+            Filtros
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              border: "1px solid #2A2E3A",
+              background: "#1B1E27",
+              color: "#9096A6",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            background: "#1F2330",
+            border: "1px solid #2A2E3A",
+            borderRadius: 10,
+            padding: "10px 12px",
+            marginBottom: 20,
+          }}
+        >
+          <Search size={15} color="#6B7180" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por nome, cargo ou partido..."
+            style={{
+              flex: 1,
+              background: "none",
+              border: "none",
+              outline: "none",
+              color: "#EDEBE4",
+              fontSize: 13.5,
+              fontFamily: "'Inter', sans-serif",
+            }}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              style={{ background: "none", border: "none", color: "#6B7180", cursor: "pointer", display: "flex" }}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#9096A6",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            marginBottom: 10,
+          }}
+        >
+          Local
+        </div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+          <GeoSelect
+            label="País"
+            value={country}
+            onChange={(v) => {
+              setCountry(v);
+              setState("");
+              setCity("");
+            }}
+            disabled={false}
+            options={COUNTRY_CODES.map((code) => ({ value: code, label: GEO[code].name }))}
+          />
+          <GeoSelect
+            label="Estado"
+            value={state}
+            onChange={(v) => {
+              setState(v);
+              setCity("");
+            }}
+            disabled={!country}
+            options={stateOptions}
+          />
+          <GeoSelect label="Cidade" value={city} onChange={setCity} disabled={!state} options={cityOptions} />
+        </div>
+
+        <div
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#9096A6",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            marginBottom: 10,
+          }}
+        >
+          Nível
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 22 }}>
+          <LevelChip label="Todos" active={level === ""} onClick={() => setLevel("")} />
+          {LEVELS.map((lv) => (
+            <LevelChip key={lv} label={LEVEL_LABEL[lv]} active={level === lv} onClick={() => setLevel(lv)} />
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#6B7180" }}>
+            {resultCount} {resultCount === 1 ? "político encontrado" : "políticos encontrados"}
+          </span>
+          <button
+            onClick={onClear}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#F5B942",
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const stepperBtnStyle = {
+  width: 30,
+  height: 30,
+  borderRadius: "50%",
+  border: "none",
+  background: "#262A36",
+  color: "#EDEBE4",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  padding: 0,
+};
+
+const LONG_PRESS_MS = 420;
+const MOVE_CANCEL_PX = 10;
+
+// Gesto compartilhado: toque curto = "tap", pressionar e segurar sem
+// mover além de MOVE_CANCEL_PX = "hold". Usado tanto pela bandeja
+// rápida quanto pelo catálogo completo, pra manter o mesmo
+// comportamento em qualquer lugar onde um item apareça.
+function useTapOrHold({ disabled, onTap, onHold }) {
+  const pressTimer = useRef(null);
+  const pressStart = useRef({ x: 0, y: 0 });
+  const longPressFired = useRef(false);
+  const moved = useRef(false);
+
+  const clearPress = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = null;
+  };
+
+  const startPress = (e) => {
+    if (disabled) return;
+    const point = e.touches ? e.touches[0] : e;
+    pressStart.current = { x: point.clientX, y: point.clientY };
+    longPressFired.current = false;
+    moved.current = false;
+    clearPress();
+    pressTimer.current = setTimeout(() => {
+      longPressFired.current = true;
+      onHold();
+    }, LONG_PRESS_MS);
+  };
+
+  const movePress = (e) => {
+    if (!pressTimer.current) return;
+    const point = e.touches ? e.touches[0] : e;
+    const dx = point.clientX - pressStart.current.x;
+    const dy = point.clientY - pressStart.current.y;
+    if (Math.hypot(dx, dy) > MOVE_CANCEL_PX) {
+      moved.current = true;
+      clearPress();
+    }
+  };
+
+  const endPress = () => {
+    const wasLongPress = longPressFired.current;
+    const wasMove = moved.current;
+    clearPress();
+    longPressFired.current = false;
+    moved.current = false;
+    if (wasLongPress || wasMove) return;
+    onTap();
+  };
+
+  return { startPress, movePress, endPress, clearPress };
+}
+
+// Painel de "ajustar quantidade" — aparece ao segurar um item, tanto
+// na bandeja rápida quanto no catálogo completo. Deixa confirmar uma
+// quantidade exata ou remover o item da sacola, sem sair da tela atual.
+function QtyAdjustBar({ item, initialQty, canRemove, onCancel, onConfirm, onRemove }) {
+  const [qty, setQty] = useState(initialQty || 1);
+  const meta = TYPE_META[item.type];
+  return (
+    <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={onCancel}
+          style={{ background: "none", border: "none", color: "#6B7180", cursor: "pointer", display: "flex", padding: 4, flexShrink: 0 }}
+        >
+          <X size={16} />
+        </button>
+        <span style={{ fontSize: 24, flexShrink: 0 }}>{item.emoji}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 600, color: "#EDEBE4" }}>
+            {item.label}
+          </div>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6", display: "flex", gap: 6 }}>
+            <span>{formatBRL(item.priceCents)} cada</span>
+            <span style={{ color: meta.color }}>{formatEffect(item)}/un.</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#1F2330", border: "1px solid #2A2E3A", borderRadius: 999, padding: 4, flexShrink: 0 }}>
+          <button onClick={() => setQty((q) => Math.max(1, q - 1))} style={stepperBtnStyle}>
+            <Minus size={13} />
+          </button>
+          <span style={{ width: 26, textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 700, color: "#EDEBE4" }}>
+            {qty}
+          </span>
+          <button onClick={() => setQty((q) => Math.min(99, q + 1))} style={stepperBtnStyle}>
+            <Plus size={13} />
+          </button>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        {canRemove && (
+          <button
+            onClick={onRemove}
+            style={{
+              width: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
+              border: "1px solid #3A2A2A",
+              background: "none",
+              color: "#E27676",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+        <button
+          onClick={() => onConfirm(qty)}
+          style={{
+            flex: 1,
+            padding: "12px 14px",
+            borderRadius: 999,
+            border: "none",
+            background: "#F5B942",
+            color: "#12141C",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          {`Confirmar ${qty}× ${item.emoji} · ${formatBRL(item.priceCents * qty)}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Bandeja de seleção: toque adiciona 1 unidade à sacola. Pressionar e
+// segurar abre um painel pra ajustar a quantidade exata daquele item
+// (ou removê-lo), sem sair da bandeja. As abas "Apoiar"/"Criticar"
+// trocam qual lado do catálogo aparece na tira; "Ver todos" abre o
+// catálogo completo, com os dois lados juntos. Nada é enviado ainda —
+// só ao pagar no checkout é que os itens seguem pro político.
+function CartTray({ politicianName, cart, onAddOne, onSetQty, cartCount, cartTotalCents, onContinue, onOpenAll }) {
+  const [qtyItem, setQtyItem] = useState(null); // item em modo "ajustar quantidade"
+  const [flashId, setFlashId] = useState(null);
+  const flashTimer = useRef(null);
+
+  const flash = (itemId) => {
+    setFlashId(itemId);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 500);
+  };
+
+  useEffect(() => () => flashTimer.current && clearTimeout(flashTimer.current), []);
+
+  if (qtyItem) {
     return (
-      <button type="button" onClick={() => setItemId(item.id)} className={`group flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-all ${active ? (positive ? 'border-[hsl(var(--primary))] bg-[hsl(var(--primary)/.09)]' : 'border-[hsl(var(--accent))] bg-[hsl(var(--accent)/.09)]') : 'border-[hsl(var(--border))] hover:border-[hsl(var(--muted-foreground)/.5)]'}`} aria-pressed={active} data-testid={`button-manifest-item-${item.id}`}>
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${positive ? 'bg-[hsl(var(--primary)/.12)] text-[hsl(var(--primary))]' : 'bg-[hsl(var(--accent)/.12)] text-[hsl(var(--accent))]'}`}>{positive ? <ThumbsUp size={14} /> : <ThumbsDown size={14} />}</span>
-        <span className="min-w-0 flex-1"><span className="block text-xs font-bold">{item.label}</span><span className="mt-1 block font-mono-civic text-[9px] uppercase tracking-[.08em] text-[hsl(var(--muted-foreground))]">peso {item.weight}</span></span>
-        {active && <Check size={16} className={positive ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--accent))]'} />}
-      </button>
+      <QtyAdjustBar
+        item={qtyItem}
+        initialQty={cart[qtyItem.id] || 1}
+        canRemove={(cart[qtyItem.id] || 0) > 0}
+        onCancel={() => setQtyItem(null)}
+        onConfirm={(qty) => {
+          onSetQty(qtyItem.id, qty);
+          setQtyItem(null);
+        }}
+        onRemove={() => {
+          onSetQty(qtyItem.id, 0);
+          setQtyItem(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", flexShrink: 0 }}>
+      <div style={{ padding: "10px 18px 0" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 600, color: "#F5B942", marginBottom: 2 }}>
+          {politicianName ? `Ataque ou defenda ${politicianName}` : "Ataque ou defenda"}
+        </div>
+        <span
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 10.5,
+            fontWeight: 700,
+            color: "#6B7180",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+          }}
+        >
+          Toque pra adicionar · segure pra ajustar qtd.
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "14px 18px 14px", WebkitOverflowScrolling: "touch" }}>
+        {MIXED_ITEMS.map((item, i) => (
+          <TrayChip
+            key={item.id}
+            item={item}
+            inCart={cart[item.id] || 0}
+            flashing={flashId === item.id}
+            suggested={i === 0 && cartCount === 0}
+            onTap={() => {
+              flash(item.id);
+              onAddOne(item.id);
+            }}
+            onHold={() => setQtyItem(item)}
+          />
+        ))}
+        <button
+          onClick={onOpenAll}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+            minWidth: 84,
+            padding: "12px 8px 9px",
+            borderRadius: 16,
+            border: "1px dashed #3A3F4E",
+            background: "#1B1E27",
+            color: "#9096A6",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          <LayoutGrid size={20} />
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+            Ver todos
+          </span>
+        </button>
+      </div>
+
+      {cartCount > 0 && (
+        <div style={{ padding: "0 18px 16px" }}>
+          <button
+            onClick={onContinue}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              padding: "13px 14px",
+              borderRadius: 999,
+              border: "none",
+              background: "#F5B942",
+              color: "#12141C",
+              fontFamily: "'Inter', sans-serif",
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            <ShoppingBag size={15} />
+            {`Continuar · ${cartCount} ${cartCount === 1 ? "item" : "itens"} · ${formatBRL(cartTotalCents)}`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Chip individual da bandeja rápida — extraído à parte pra poder usar
+// o hook de gesto compartilhado (useTapOrHold não pode ser chamado
+// dentro de um .map, precisa estar no corpo de um componente próprio).
+function TrayChip({ item, inCart, flashing, suggested, onTap, onHold }) {
+  const { startPress, movePress, endPress, clearPress } = useTapOrHold({ onTap, onHold });
+  const meta = TYPE_META[item.type];
+  const animations = [];
+  if (flashing) animations.push("poppol-pop 340ms ease");
+  if (suggested) animations.push("poppol-invite-pulse 1.8s ease-in-out infinite");
+  return (
+    <button
+      onPointerDown={startPress}
+      onPointerMove={movePress}
+      onPointerUp={endPress}
+      onPointerLeave={clearPress}
+      onPointerCancel={clearPress}
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 4,
+        minWidth: 84,
+        padding: "12px 8px 9px",
+        borderRadius: 16,
+        border: inCart > 0 ? `1px solid ${meta.color}` : "1px solid #262A36",
+        background: inCart > 0 ? meta.soft : "#1B1E27",
+        cursor: "pointer",
+        flexShrink: 0,
+        touchAction: "pan-x",
+        userSelect: "none",
+        animation: animations.length ? animations.join(", ") : "none",
+        overflow: "visible",
+      }}
+    >
+      {inCart > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: -7,
+            right: -7,
+            minWidth: 17,
+            height: 17,
+            borderRadius: 999,
+            background: "#F5B942",
+            color: "#12141C",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 10,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 3px",
+          }}
+        >
+          {inCart}
+        </span>
+      )}
+      <span style={{ fontSize: 34, lineHeight: 1, marginTop: 2 }}>{item.emoji}</span>
+      <span
+        style={{
+          fontFamily: "'Inter', sans-serif",
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: "#EDEBE4",
+          textAlign: "center",
+          lineHeight: 1.2,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          maxWidth: 76,
+        }}
+      >
+        {item.label}
+      </span>
+      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, color: meta.color }}>
+        {formatEffect(item)}
+      </span>
+      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, color: "#9096A6", marginTop: 1 }}>
+        {formatBRL(item.priceCents)}
+      </span>
+    </button>
+  );
+}
+
+// Cartão de item do catálogo completo — versão maior do TrayChip, em
+// grade, com o ícone em destaque e o nome sempre visível.
+function GridItemCard({ item, inCart, flashing, onTap, onHold }) {
+  const { startPress, movePress, endPress, clearPress } = useTapOrHold({ onTap, onHold });
+  const meta = TYPE_META[item.type];
+  return (
+    <button
+      onPointerDown={startPress}
+      onPointerMove={movePress}
+      onPointerUp={endPress}
+      onPointerLeave={clearPress}
+      onPointerCancel={clearPress}
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 5,
+        padding: "18px 8px 12px",
+        borderRadius: 18,
+        border: inCart > 0 ? `1px solid ${meta.color}` : "1px solid #262A36",
+        background: inCart > 0 ? meta.soft : "#1B1E27",
+        cursor: "pointer",
+        touchAction: "manipulation",
+        userSelect: "none",
+        animation: flashing ? "poppol-pop 340ms ease" : "none",
+        overflow: "visible",
+      }}
+    >
+      {inCart > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: -8,
+            right: -8,
+            minWidth: 19,
+            height: 19,
+            borderRadius: 999,
+            background: "#F5B942",
+            color: "#12141C",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 10.5,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 4px",
+          }}
+        >
+          {inCart}
+        </span>
+      )}
+      <span style={{ fontSize: 42, lineHeight: 1, marginTop: 2 }}>{item.emoji}</span>
+      <span
+        style={{
+          fontFamily: "'Inter', sans-serif",
+          fontSize: 12,
+          fontWeight: 600,
+          color: "#EDEBE4",
+          textAlign: "center",
+          lineHeight: 1.25,
+        }}
+      >
+        {item.label}
+      </span>
+      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, color: meta.color }}>
+        {formatEffect(item)}
+      </span>
+      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, color: "#9096A6", marginTop: 1 }}>
+        {formatBRL(item.priceCents)}
+      </span>
+    </button>
+  );
+}
+
+// Catálogo completo em tela cheia — pensado pra listas de itens muito
+// maiores do que cabem na tira. Agrupa por lado (apoio / crítica) e
+// tem busca no topo; abre por cima do modal de detalhe.
+function ItemPickerSheet({ cart, onAddOne, onSetQty, onClose }) {
+  const [query, setQuery] = useState("");
+  const [qtyItem, setQtyItem] = useState(null);
+  const [flashId, setFlashId] = useState(null);
+  const flashTimer = useRef(null);
+
+  const flash = (itemId) => {
+    setFlashId(itemId);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 500);
+  };
+
+  useEffect(() => () => flashTimer.current && clearTimeout(flashTimer.current), []);
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = (item) => !q || item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q);
+    return CATEGORY_LABELS.map((label, tier) => ({
+      label,
+      items: ITEMS.filter((it) => it.tier === tier && matches(it)),
+    })).filter((g) => g.items.length > 0);
+  }, [query]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 75, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.82)" }} />
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 480,
+          margin: "0 auto",
+          height: "92vh",
+          display: "flex",
+          flexDirection: "column",
+          background: "#181B24",
+          borderTop: "1px solid #2A2E3A",
+          borderRadius: "24px 24px 0 0",
+          overflow: "hidden",
+          animation: "poppol-sheet-up 220ms ease",
+        }}
+      >
+        <div style={{ padding: "18px 20px 12px", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 600, color: "#EDEBE4" }}>
+              Todos os itens
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                border: "1px solid #2A2E3A",
+                background: "#1B1E27",
+                color: "#9096A6",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#1F2330",
+              border: "1px solid #2A2E3A",
+              borderRadius: 10,
+              padding: "10px 12px",
+            }}
+          >
+            <Search size={15} color="#6B7180" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar item..."
+              style={{
+                flex: 1,
+                background: "none",
+                border: "none",
+                outline: "none",
+                color: "#EDEBE4",
+                fontSize: 13.5,
+                fontFamily: "'Inter', sans-serif",
+              }}
+            />
+            {query && (
+              <button
+                onClick={() => setQuery("")}
+                style={{ background: "none", border: "none", color: "#6B7180", cursor: "pointer", display: "flex" }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 20px 20px", WebkitOverflowScrolling: "touch" }}>
+          {groups.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#6B7180", fontFamily: "'Inter', sans-serif", fontSize: 13, padding: "40px 0" }}>
+              Nenhum item encontrado.
+            </div>
+          ) : (
+            groups.map(({ label, items }) => (
+              <div key={label} style={{ marginBottom: 22 }}>
+                <div
+                  style={{
+                    fontFamily: "'Inter', sans-serif",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#9096A6",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: 10,
+                  }}
+                >
+                  {label}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 12 }}>
+                  {items.map((item) => (
+                    <GridItemCard
+                      key={item.id}
+                      item={item}
+                      inCart={cart[item.id] || 0}
+                      flashing={flashId === item.id}
+                      onTap={() => {
+                        flash(item.id);
+                        onAddOne(item.id);
+                      }}
+                      onHold={() => setQtyItem(item)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {qtyItem && (
+          <QtyAdjustBar
+            item={qtyItem}
+            initialQty={cart[qtyItem.id] || 1}
+            canRemove={(cart[qtyItem.id] || 0) > 0}
+            onCancel={() => setQtyItem(null)}
+            onConfirm={(qty) => {
+              onSetQty(qtyItem.id, qty);
+              setQtyItem(null);
+            }}
+            onRemove={() => {
+              onSetQty(qtyItem.id, 0);
+              setQtyItem(null);
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Checkout: revisão da sacola + pagamento simulado (Pix/cartão). Só
+// depois que o pagamento é "aprovado" os itens vão pro sentMap do
+// político — antes disso, nada foi enviado de verdade. Mostra também
+// o efeito líquido que a sacola vai ter no saldo de relevância.
+function CheckoutView({ p, cart, cartEntries, cartTotalCents, previewDelta, onBack, onSetQty, onPay, paying }) {
+  const deltaMeta = previewDelta >= 0 ? TYPE_META.apoio : TYPE_META.rejeicao;
+  return (
+    <>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button
+            onClick={onBack}
+            disabled={paying}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              border: "1px solid #2A2E3A",
+              background: "#1B1E27",
+              color: "#9096A6",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: paying ? "default" : "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>
+              Revisar pedido
+            </div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>
+              Itens serão enviados a {p.name}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {cartEntries.map(({ item, qty }) => {
+            const meta = TYPE_META[item.type];
+            return (
+              <div
+                key={item.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  background: "#1F2330",
+                  border: "1px solid #2A2E3A",
+                  borderRadius: 14,
+                  padding: "10px 12px",
+                }}
+              >
+                <span style={{ fontSize: 22, flexShrink: 0 }}>{item.emoji}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 600, color: "#EDEBE4" }}>
+                    {item.label}
+                  </div>
+                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6", display: "flex", gap: 6 }}>
+                    <span>{formatBRL(item.priceCents)} cada</span>
+                    <span style={{ color: meta.color }}>{formatEffect(item)}/un.</span>
+                  </div>
+                </div>
+                {!paying && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 2, background: "#171922", border: "1px solid #2A2E3A", borderRadius: 999, padding: 3, flexShrink: 0 }}>
+                    <button onClick={() => onSetQty(item.id, qty - 1)} style={{ ...stepperBtnStyle, width: 24, height: 24 }}>
+                      <Minus size={11} />
+                    </button>
+                    <span style={{ width: 20, textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 700, color: "#EDEBE4" }}>
+                      {qty}
+                    </span>
+                    <button onClick={() => onSetQty(item.id, qty + 1)} style={{ ...stepperBtnStyle, width: 24, height: 24 }}>
+                      <Plus size={11} />
+                    </button>
+                  </div>
+                )}
+                <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4", flexShrink: 0, minWidth: 64, textAlign: "right" }}>
+                  {formatBRL(item.priceCents * qty)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 14,
+            background: deltaMeta.soft,
+            border: `1px solid ${deltaMeta.color}55`,
+            borderRadius: 14,
+            padding: "12px 14px",
+          }}
+        >
+          {previewDelta >= 0 ? (
+            <TrendingUp size={16} color={deltaMeta.color} style={{ flexShrink: 0 }} />
+          ) : (
+            <TrendingDown size={16} color={deltaMeta.color} style={{ flexShrink: 0 }} />
+          )}
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#C7CCD6", lineHeight: 1.42, flex: 1 }}>
+            Efeito na popularidade de {p.name}
+          </span>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 700, color: deltaMeta.color, flexShrink: 0 }}>
+            {formatScore(previewDelta)}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px" }}>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 600, color: "#9096A6" }}>
+            Total
+          </span>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, color: "#EDEBE4" }}>
+            {formatBRL(cartTotalCents)}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px", flexShrink: 0 }}>
+        <button
+          onClick={onPay}
+          disabled={paying}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "14px 14px",
+            borderRadius: 999,
+            border: "none",
+            background: "#F5B942",
+            color: "#12141C",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 13.5,
+            fontWeight: 700,
+            cursor: paying ? "default" : "pointer",
+            opacity: paying ? 0.85 : 1,
+          }}
+        >
+          {paying ? (
+            <>
+              <Loader2 size={16} className="poppol-spin" />
+              Processando pagamento…
+            </>
+          ) : (
+            <>
+              <CreditCard size={16} />
+              {`Pagar ${formatBRL(cartTotalCents)} · Pix ou cartão`}
+            </>
+          )}
+        </button>
+      </div>
+    </>
+  );
+}
+
+function DetailModal({ p, sentForP, onClose, onSend, onShare }) {
+  const cardImg = cardPortraitDataUri(p.id, p.initials);
+  const [cart, setCart] = useState({}); // { itemId: qty }
+  const [stage, setStage] = useState("browse"); // 'browse' | 'checkout'
+  const [paying, setPaying] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const payTimer = useRef(null);
+
+  useEffect(() => () => payTimer.current && clearTimeout(payTimer.current), []);
+
+  const receivedTotals = useMemo(() => {
+    const totals = {};
+    ITEMS.forEach((item) => {
+      totals[item.id] = (p.baseByItem[item.id] || 0) + (sentForP[item.id] || 0);
+    });
+    return totals;
+  }, [p, sentForP]);
+  const netScore = useMemo(() => netScoreOf(receivedTotals), [receivedTotals]);
+  const weighted = useMemo(() => weightedTotalsOf(receivedTotals), [receivedTotals]);
+  const receivedItems = useMemo(() => ITEMS.filter((item) => receivedTotals[item.id] > 0), [receivedTotals]);
+  const barTotal = weighted.apoio + weighted.rejeicao;
+  const apoioPct = barTotal > 0 ? (weighted.apoio / barTotal) * 100 : 50;
+  const scoreColor = netScore >= 0 ? TYPE_META.apoio.color : TYPE_META.rejeicao.color;
+
+  const cartEntries = useMemo(
+    () => ITEMS.filter((item) => (cart[item.id] || 0) > 0).map((item) => ({ item, qty: cart[item.id] })),
+    [cart]
+  );
+  const cartCount = useMemo(() => sumValues(cart), [cart]);
+  const cartTotalCents = useMemo(
+    () => cartEntries.reduce((sum, e) => sum + e.item.priceCents * e.qty, 0),
+    [cartEntries]
+  );
+  const previewDelta = useMemo(
+    () => cartEntries.reduce((sum, e) => sum + TYPE_META[e.item.type].sign * e.item.value * e.qty, 0),
+    [cartEntries]
+  );
+
+  const addOne = (itemId) => setCart((c) => ({ ...c, [itemId]: (c[itemId] || 0) + 1 }));
+  const setQty = (itemId, qty) =>
+    setCart((c) => {
+      const next = { ...c };
+      if (qty <= 0) delete next[itemId];
+      else next[itemId] = Math.min(99, qty);
+      return next;
+    });
+
+  const goCheckout = () => {
+    if (cartCount > 0) setStage("checkout");
+  };
+  const backToBrowse = () => setStage("browse");
+
+  const handlePay = () => {
+    setPaying(true);
+    payTimer.current = setTimeout(() => {
+      onSend(cartEntries);
+      setCart({});
+      setPaying(false);
+      setStage("browse");
+    }, 900);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={paying ? undefined : onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.78)" }} />
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 480,
+          margin: "0 auto",
+          maxHeight: "88vh",
+          display: "flex",
+          flexDirection: "column",
+          background: "#181B24",
+          borderTop: "1px solid #2A2E3A",
+          borderRadius: "24px 24px 0 0",
+          overflow: "hidden",
+          animation: "poppol-sheet-up 220ms ease",
+        }}
+      >
+        {stage === "checkout" ? (
+          <CheckoutView
+            p={p}
+            cart={cart}
+            cartEntries={cartEntries}
+            cartTotalCents={cartTotalCents}
+            previewDelta={previewDelta}
+            onBack={backToBrowse}
+            onSetQty={setQty}
+            onPay={handlePay}
+            paying={paying}
+          />
+        ) : (
+          <>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 22px 24px" }}>
+              <button
+                onClick={onShare}
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  right: 60,
+                  width: 32,
+                  height: 32,
+                  borderRadius: "50%",
+                  border: "1px solid rgba(255,255,255,0.28)",
+                  background: "rgba(20,22,29,0.55)",
+                  backdropFilter: "blur(6px)",
+                  color: "#EDEBE4",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  zIndex: 2,
+                }}
+              >
+                <Share2 size={14} />
+              </button>
+              <button
+                onClick={onClose}
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  right: 16,
+                  width: 32,
+                  height: 32,
+                  borderRadius: "50%",
+                  border: "1px solid #2A2E3A",
+                  background: "#1B1E27",
+                  color: "#9096A6",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  zIndex: 2,
+                }}
+              >
+                <X size={16} />
+              </button>
+
+              <div
+                style={{
+                  position: "relative",
+                  margin: "-20px -22px 0",
+                  height: "40vh",
+                  minHeight: 280,
+                  maxHeight: 400,
+                  overflow: "hidden",
+                  borderRadius: "24px 24px 0 0",
+                  boxSizing: "border-box",
+                }}
+              >
+                <img
+                  src={cardImg}
+                  alt={p.name}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                />
+
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "linear-gradient(180deg, rgba(0,0,0,0) 34%, rgba(12,13,18,0.78) 76%, #181B24 100%)",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    padding: "20px 22px",
+                  }}
+                >
+                  <div>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: p.party.color,
+                        background: "rgba(12,13,18,0.55)",
+                        border: `1px solid ${p.party.color}55`,
+                        padding: "3px 9px",
+                        borderRadius: 6,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {p.party.code} · {p.party.name}
+                    </span>
+                    <div
+                      style={{
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: 24,
+                        fontWeight: 700,
+                        color: "#FFFFFF",
+                        lineHeight: 1.12,
+                        textShadow: "0 2px 10px rgba(0,0,0,0.5)",
+                      }}
+                    >
+                      {p.name}
+                    </div>
+                    <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#E4E2DA", marginTop: 3 }}>
+                      {p.role} · {LEVEL_LABEL[p.level]}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontFamily: "'Inter', sans-serif",
+                        fontSize: 12,
+                        color: "#B7BCC7",
+                        marginTop: 4,
+                      }}
+                    >
+                      <MapPin size={11} strokeWidth={2} />
+                      {locationLabel(p)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ padding: "20px 2px 0" }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span
+                    style={{
+                      fontFamily: "'Inter', sans-serif",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "#9096A6",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    Popularidade
+                  </span>
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 700, color: scoreColor }}>
+                    {formatScore(netScore)}
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", background: "#2A2E3A", marginBottom: 6 }}>
+                  <div style={{ width: `${apoioPct}%`, background: TYPE_META.apoio.color }} />
+                  <div style={{ width: `${100 - apoioPct}%`, background: TYPE_META.rejeicao.color }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: TYPE_META.apoio.color, fontWeight: 600 }}>
+                    {formatCount(weighted.apoio)} de defesa
+                  </span>
+                  <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: TYPE_META.rejeicao.color, fontWeight: 600 }}>
+                    {formatCount(weighted.rejeicao)} de ataque
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", gap: 10 }}>
+                  {receivedItems.length === 0 ? (
+                    <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#6B7180", gridColumn: "1 / -1" }}>
+                      Nenhum item recebido ainda.
+                    </span>
+                  ) : (
+                    receivedItems.map((item) => {
+                      const count = receivedTotals[item.id];
+                      const meta = TYPE_META[item.type];
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            gap: 3,
+                            background: "#1F2330",
+                            border: "1px solid #2A2E3A",
+                            borderRadius: 14,
+                            padding: "12px 6px 10px",
+                          }}
+                        >
+                          <span style={{ fontSize: 26, lineHeight: 1 }}>{item.emoji}</span>
+                          <span
+                            style={{
+                              fontFamily: "'Inter', sans-serif",
+                              fontSize: 10.5,
+                              fontWeight: 600,
+                              color: "#EDEBE4",
+                              textAlign: "center",
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            {item.label}
+                          </span>
+                          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 9.5, fontWeight: 700, color: meta.color }}>
+                            {formatEffect(item)}
+                          </span>
+                          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, color: "#9096A6", marginTop: 1 }}>
+                            ×{formatCount(count)}
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <CartTray
+              politicianName={p.name}
+              cart={cart}
+              onAddOne={addOne}
+              onSetQty={setQty}
+              cartCount={cartCount}
+              cartTotalCents={cartTotalCents}
+              onContinue={goCheckout}
+              onOpenAll={() => setPickerOpen(true)}
+            />
+          </>
+        )}
+      </div>
+
+      {pickerOpen && (
+        <ItemPickerSheet
+          cart={cart}
+          onAddOne={addOne}
+          onSetQty={setQty}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function PopPolTreemap() {
+  const politicians = useMemo(() => buildPoliticians(26), []);
+  const [query, setQuery] = useState("");
+  const [country, setCountry] = useState("");
+  const [state, setState] = useState("");
+  const [city, setCity] = useState("");
+  const [level, setLevel] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [sentMap, setSentMap] = useState({}); // { politicianId: { itemId: qty } }
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const [size, setSize] = useState({
+    w: typeof window !== "undefined" ? window.innerWidth : 1200,
+    h: typeof window !== "undefined" ? window.innerHeight : 800,
+  });
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    onResize();
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
+  useEffect(() => () => toastTimer.current && clearTimeout(toastTimer.current), []);
+
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1800);
+  }, []);
+
+  // O tamanho de cada político no mapa é recalculado sempre que
+  // sentMap muda — é isso que faz o grid "respirar" a cada envio,
+  // crescendo com apoio e encolhendo com crítica.
+  const politiciansWithTotals = useMemo(
+    () =>
+      politicians.map((p) => {
+        const sentForP = sentMap[p.id] || {};
+        const netScore = netScoreOf(p.baseByItem) + netScoreOf(sentForP);
+        const totalItems = sumValues(p.baseByItem) + sumValues(sentForP);
+        return { ...p, netScore, totalItems };
+      }),
+    [politicians, sentMap]
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return politiciansWithTotals.filter((p) => {
+      if (level && p.level !== level) return false;
+      if (country && p.countryCode !== country) return false;
+      if (state && p.stateCode !== state) return false;
+      if (city && p.city !== city) return false;
+      if (!q) return true;
+      const haystack = [p.name, p.role, p.party.name, p.party.code, LEVEL_LABEL[p.level], locationLabel(p)]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [politiciansWithTotals, query, country, state, city, level]);
+
+  const rects = useMemo(() => computeTreemap(filtered, size.w, size.h), [filtered, size]);
+
+  const activeFilterCount = [country, state, city, level, query.trim()].filter(Boolean).length;
+
+  const clearFilters = () => {
+    setQuery("");
+    setCountry("");
+    setState("");
+    setCity("");
+    setLevel("");
+  };
+
+  const selected = politicians.find((p) => p.id === selectedId) || null;
+
+  // Só é chamado depois que o pagamento simulado (Pix/cartão) é
+  // "aprovado" no checkout — cartEntries é a sacola inteira, com
+  // todos os itens (de apoio e/ou crítica) e quantidades escolhidos.
+  const handleSend = (p, cartEntries) => {
+    setSentMap((prev) => {
+      const forP = { ...(prev[p.id] || {}) };
+      cartEntries.forEach(({ item, qty }) => {
+        forP[item.id] = (forP[item.id] || 0) + qty;
+      });
+      return { ...prev, [p.id]: forP };
+    });
+    const itemsCount = cartEntries.reduce((sum, e) => sum + e.qty, 0);
+    const totalCents = cartEntries.reduce((sum, e) => sum + e.item.priceCents * e.qty, 0);
+    const delta = cartEntries.reduce((sum, e) => sum + TYPE_META[e.item.type].sign * e.item.value * e.qty, 0);
+    showToast(
+      `Pagamento aprovado — ${itemsCount} ${itemsCount === 1 ? "item enviado" : "itens enviados"} para ${p.name} · ${formatBRL(totalCents)} · popularidade ${formatScore(delta)}`
     );
   };
+
+  const handleShare = (p) => {
+    showToast(`Link do perfil de ${p.name} copiado!`);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[hsl(var(--foreground)/.48)] p-0 backdrop-blur-sm sm:items-center sm:p-5" role="dialog" aria-modal="true" aria-labelledby="manifest-title">
-      <div className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-[26px] bg-[hsl(var(--card))] shadow-2xl sm:rounded-[26px]">
-        <div className="sticky top-0 z-10 flex items-start justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card)/.96)] px-5 py-5 backdrop-blur-xl md:px-7">
-          <div><p className="font-mono-civic text-[10px] uppercase tracking-[.18em] text-[hsl(var(--accent))]">Sua voz / agora</p><h2 id="manifest-title" className="mt-2 font-display text-3xl tracking-[-.035em]">Manifestar sobre {profile.name}</h2><p className="mt-1 text-xs text-[hsl(var(--muted-foreground))]">Escolha uma posição. Contexto é bem-vindo.</p></div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]" aria-label="Fechar manifestação" data-testid="button-close-manifestation"><X size={19} /></button>
-        </div>
-        <div className="space-y-6 px-5 py-6 md:px-7">
-          {profile.items.length === 0 ? <div className="rounded-xl border border-dashed border-[hsl(var(--border))] p-6 text-center text-sm text-[hsl(var(--muted-foreground))]" data-testid="empty-manifestation-items">Não há itens de manifestação disponíveis para este perfil.</div> : <>
-            {positiveItems.length > 0 && <div><p className="mb-2 flex items-center gap-2 font-mono-civic text-[10px] uppercase tracking-[.16em] text-[hsl(var(--primary))]"><ThumbsUp size={13} /> Apoiar</p><div className="grid gap-2 md:grid-cols-2">{positiveItems.map((item) => <ItemChoice key={item.id} item={item} />)}</div></div>}
-            {criticalItems.length > 0 && <div><p className="mb-2 flex items-center gap-2 font-mono-civic text-[10px] uppercase tracking-[.16em] text-[hsl(var(--accent))]"><ThumbsDown size={13} /> Criticar</p><div className="grid gap-2 md:grid-cols-2">{criticalItems.map((item) => <ItemChoice key={item.id} item={item} />)}</div></div>}
-            <div><div className="flex items-center justify-between"><label htmlFor="manifest-note" className="text-xs font-bold">Nota pública <span className="font-normal text-[hsl(var(--muted-foreground))]">(opcional)</span></label><span className="font-mono-civic text-[10px] text-[hsl(var(--muted-foreground))]">{note.length}/280</span></div><textarea id="manifest-note" value={note} maxLength={280} onChange={(event) => setNote(event.target.value)} placeholder="O que sustenta sua posição?" className="mt-2 min-h-24 w-full resize-y rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-3 text-sm outline-none placeholder:text-[hsl(var(--muted-foreground)/.7)] focus:border-[hsl(var(--primary))] focus:ring-2 focus:ring-[hsl(var(--primary)/.12)]" data-testid="textarea-manifestation-note" /></div>
-            {manifestation.isError && <p className="flex items-center gap-2 rounded-lg bg-[hsl(var(--accent)/.1)] px-3 py-2.5 text-xs text-[hsl(var(--accent))]" data-testid="status-manifestation-error"><AlertCircle size={14} /> Sua manifestação não foi registrada. Tente novamente.</p>}
-            <button type="button" disabled={!selected || manifestation.isPending} onClick={submit} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[hsl(var(--foreground))] px-4 py-3.5 text-sm font-bold text-[hsl(var(--background))] transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45" data-testid="button-submit-manifestation">
-              {manifestation.isPending ? <><RefreshCw size={16} className="animate-spin" /> Registrando...</> : <><Send size={16} /> Registrar manifestação</>}
+    <div style={{ position: "fixed", inset: 0, background: "#0C0D12", fontFamily: "'Inter', sans-serif", overflow: "hidden" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        ::selection { background: #F5B942; color: #12141C; }
+        input::placeholder { color: #6B7180; }
+        select option { background: #1F2330; color: #EDEBE4; }
+        @keyframes poppol-sheet-up {
+          from { transform: translateY(24px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes poppol-pop {
+          0% { transform: scale(1); }
+          40% { transform: scale(1.18); }
+          100% { transform: scale(1); }
+        }
+        @keyframes poppol-invite-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245,185,66,0.45); }
+          50% { box-shadow: 0 0 0 6px rgba(245,185,66,0); }
+        }
+        @keyframes poppol-toast-in {
+          from { transform: translate(-50%, -8px); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .poppol-spin { animation: poppol-spin-anim 0.8s linear infinite; }
+        @keyframes poppol-spin-anim {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      <div style={{ position: "absolute", inset: 0 }}>
+        {filtered.length === 0 ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#6B7180",
+              textAlign: "center",
+              padding: 20,
+            }}
+          >
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, color: "#9096A6", marginBottom: 6 }}>
+              Nenhum político encontrado
+            </div>
+            <div style={{ fontSize: 13, marginBottom: 16 }}>Tente ajustar o local, o nível ou a busca.</div>
+            <button
+              onClick={clearFilters}
+              style={{
+                background: "#F5B94222",
+                border: "1px solid #F5B942",
+                color: "#F5B942",
+                fontFamily: "'Inter', sans-serif",
+                fontSize: 13,
+                fontWeight: 600,
+                padding: "8px 16px",
+                borderRadius: 999,
+                cursor: "pointer",
+              }}
+            >
+              Limpar filtros
             </button>
-            <p className="text-center text-[10px] leading-4 text-[hsl(var(--muted-foreground))]">Sua participação fica pública e ajuda a formar o pulso coletivo.</p>
-          </>}
-        </div>
+          </div>
+        ) : (
+          rects.map((rect) => (
+            <TreemapCell
+              key={rect.item.id}
+              rect={rect}
+              gap={4}
+              onClick={() => setSelectedId(rect.item.id)}
+            />
+          ))
+        )}
       </div>
+
+      <div
+        style={{
+          position: "absolute",
+          top: 14,
+          left: 14,
+          right: 14,
+          zIndex: 30,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 16,
+            fontWeight: 700,
+            color: "#EDEBE4",
+            textShadow: "0 2px 8px rgba(0,0,0,0.6)",
+            background: "rgba(20,22,29,0.5)",
+            backdropFilter: "blur(6px)",
+            padding: "7px 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          PopPol
+        </span>
+
+        <button
+          onClick={() => setFilterOpen(true)}
+          style={{
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            background: "rgba(20,22,29,0.55)",
+            backdropFilter: "blur(6px)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 999,
+            padding: "8px 14px",
+            color: "#EDEBE4",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 12.5,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <SlidersHorizontal size={14} />
+          Filtros
+          {activeFilterCount > 0 && (
+            <span
+              style={{
+                minWidth: 16,
+                height: 16,
+                borderRadius: 999,
+                background: "#F5B942",
+                color: "#12141C",
+                fontSize: 10,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0 4px",
+              }}
+            >
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {filterOpen && (
+        <FilterSheet
+          query={query}
+          setQuery={setQuery}
+          country={country}
+          setCountry={setCountry}
+          state={state}
+          setState={setState}
+          city={city}
+          setCity={setCity}
+          level={level}
+          setLevel={setLevel}
+          resultCount={filtered.length}
+          onClose={() => setFilterOpen(false)}
+          onClear={clearFilters}
+        />
+      )}
+
+      {selected && (
+        <DetailModal
+          p={selected}
+          sentForP={sentMap[selected.id] || {}}
+          onClose={() => setSelectedId(null)}
+          onSend={(cartEntries) => handleSend(selected, cartEntries)}
+          onShare={() => handleShare(selected)}
+        />
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            top: 20,
+            left: "50%",
+            zIndex: 80,
+            transform: "translateX(-50%)",
+            background: "#1B1E27",
+            border: "1px solid #2A2E3A",
+            color: "#EDEBE4",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 12.5,
+            fontWeight: 600,
+            padding: "9px 16px",
+            borderRadius: 999,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+            animation: "poppol-toast-in 180ms ease",
+            whiteSpace: "nowrap",
+            maxWidth: "88%",
+            textAlign: "center",
+          }}
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
-
-function Profile() {
-  const { id } = useParams<{ id: string }>();
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const profileQuery = useGetPolitician(id ?? '', { query: { queryKey: getGetPoliticianQueryKey(id ?? ''), staleTime: 30_000 } });
-  const profile = profileQuery.data;
-  const queryClient = useQueryClient();
-  const onManifestSuccess = () => {
-    setSuccess(true);
-    window.setTimeout(() => setSuccess(false), 4500);
-    void queryClient.invalidateQueries({ queryKey: getGetPoliticianQueryKey(id ?? '') });
-    void queryClient.invalidateQueries({ queryKey: getListActivityQueryKey() });
-    void queryClient.invalidateQueries({ queryKey: getGetOverviewStatsQueryKey() });
-  };
-
-  if (profileQuery.isLoading) return <AppShell><div className="mx-auto max-w-[1320px] px-5 py-12 md:px-10"><LoadingBlock className="h-6 w-24" /><LoadingBlock className="mt-8 h-64" /><div className="mt-7 grid gap-5 lg:grid-cols-3"><LoadingBlock className="h-60 lg:col-span-2" /><LoadingBlock className="h-60" /></div></div></AppShell>;
-  if (profileQuery.isError || !profile) return <AppShell><div className="mx-auto max-w-[1320px] px-5 py-12 md:px-10"><Link href="/" className="inline-flex items-center gap-2 text-sm font-bold text-[hsl(var(--primary))]" data-testid="link-back-error"><ArrowLeft size={16} /> Voltar para descoberta</Link><div className="mt-8"><ErrorState onRetry={() => profileQuery.refetch()} /></div></div></AppShell>;
-
-  return (
-    <AppShell>
-      <div className="mx-auto max-w-[1320px] px-5 py-7 md:px-10 md:py-10">
-        <Link href="/" className="inline-flex items-center gap-2 text-xs font-bold text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--primary))]" data-testid="link-back-discover"><ArrowLeft size={15} /> Voltar para descoberta</Link>
-        <section className="animate-enter relative mt-6 overflow-hidden rounded-[26px] bg-[hsl(var(--foreground))] px-6 py-8 text-[hsl(var(--background))] md:px-10 md:py-10">
-          <div className="absolute right-0 top-0 h-full w-2/5 opacity-70" style={{ background: `radial-gradient(circle at 70% 25%, ${profile.party.color} 0, transparent 54%)` }} />
-          <div className="relative flex flex-col justify-between gap-9 lg:flex-row lg:items-end">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-[28px] border border-[hsl(var(--background)/.2)] bg-[hsl(var(--background)/.1)] font-mono-civic text-xl">{profile.initials}</div>
-              <div><div className="flex flex-wrap items-center gap-2"><PartyPill party={profile.party} /><span className="font-mono-civic text-[10px] uppercase tracking-[.12em] text-[hsl(var(--background)/.55)]">{profile.level}</span></div><h1 className="mt-3 font-display text-5xl leading-[.9] tracking-[-.05em] md:text-6xl" data-testid="text-politician-name">{profile.name}</h1><p className="mt-3 text-sm text-[hsl(var(--background)/.65)]">{profile.role} · {profile.region}</p></div>
-            </div>
-            <button type="button" onClick={() => setPanelOpen(true)} className="group inline-flex items-center justify-center gap-2 rounded-xl bg-[hsl(var(--accent))] px-5 py-3.5 text-sm font-extrabold text-[hsl(var(--accent-foreground))] transition-transform hover:-translate-y-0.5" data-testid="button-open-manifestation"><MessageSquare size={17} /> Manifestar agora <ArrowUpRight size={15} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></button>
-          </div>
-        </section>
-        {success && <div className="mt-4 flex items-center gap-3 rounded-xl border border-[hsl(var(--primary)/.3)] bg-[hsl(var(--primary)/.1)] px-4 py-3 text-sm text-[hsl(var(--primary))]" role="status" data-testid="status-manifestation-success"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"><Check size={14} /></span> Manifestação registrada. Obrigado por participar da praça.</div>}
-
-        <div className="mt-7 grid gap-5 lg:grid-cols-[1.35fr_.65fr]">
-          <div className="space-y-5">
-            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-card)] md:p-7">
-              <div className="flex items-center gap-2 font-mono-civic text-[10px] uppercase tracking-[.18em] text-[hsl(var(--primary))]"><ShieldCheck size={14} /> contexto</div>
-              <p className="mt-5 max-w-2xl font-display text-2xl leading-[1.15] tracking-[-.025em]" data-testid="text-politician-bio">{profile.bio}</p>
-              <div className="mt-7 border-t border-[hsl(var(--border))] pt-5"><p className="font-mono-civic text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Mandatos e funções</p><div className="mt-3 flex flex-wrap gap-2">{profile.mandates.length ? profile.mandates.map((mandate) => <span key={mandate} className="rounded-lg bg-[hsl(var(--muted))] px-3 py-2 text-xs font-semibold">{mandate}</span>) : <span className="text-sm text-[hsl(var(--muted-foreground))]">Nenhum mandato informado.</span>}</div></div>
-            </section>
-            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-card)] md:p-7">
-              <div className="flex items-center justify-between"><div><p className="font-mono-civic text-[10px] uppercase tracking-[.18em] text-[hsl(var(--accent))]">Histórico aberto</p><h2 className="mt-2 font-display text-3xl tracking-[-.035em]">Pulso da praça</h2></div><Clock3 size={19} className="text-[hsl(var(--accent))]" /></div>
-              <div className="mt-5">{profile.recentActivity?.length ? profile.recentActivity.map((item) => <ActivityRow key={item.id} activity={item} compact />) : <div className="rounded-xl border border-dashed border-[hsl(var(--border))] py-10 text-center text-sm text-[hsl(var(--muted-foreground))]" data-testid="empty-profile-activity">Ainda não há manifestações neste perfil.</div>}</div>
-            </section>
-          </div>
-          <aside className="space-y-5">
-            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-[var(--shadow-card)]">
-              <div className="flex items-start justify-between"><div><p className="font-mono-civic text-[10px] uppercase tracking-[.16em] text-[hsl(var(--muted-foreground))]">Índice público</p><p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">leitura do momento</p></div><ScoreRing score={profile.score} large /></div>
-              <div className="mt-6"><SentimentBar support={profile.support} criticism={profile.criticism} /></div>
-              <div className="mt-6 flex items-center justify-between border-t border-[hsl(var(--border))] pt-4 text-xs"><span className="text-[hsl(var(--muted-foreground))]">Tendência</span><span className={`flex items-center gap-1 font-mono-civic ${profile.trend >= 0 ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--accent))]'}`}>{profile.trend >= 0 ? <TrendingUp size={13} /> : <Minus size={13} />}{profile.trend >= 0 ? '+' : ''}{profile.trend.toFixed(1)}%</span></div>
-            </section>
-            <section className="paper-grid rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--muted)/.58)] p-6">
-              <MapPin size={18} className="text-[hsl(var(--accent))]" /><p className="mt-7 font-display text-2xl leading-tight tracking-[-.025em]">A opinião pública muda quando encontra contexto.</p><p className="mt-3 text-xs leading-5 text-[hsl(var(--muted-foreground))]">Veja a trajetória antes de reagir ao momento.</p>
-            </section>
-          </aside>
-        </div>
-      </div>
-      {panelOpen && <ManifestationPanel profile={profile} onClose={() => setPanelOpen(false)} onSuccess={onManifestSuccess} />}
-    </AppShell>
-  );
-}
-
-function Router() {
-  return (
-    <ErrorBoundary resetKey={useLocation()[0]}>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/politicians/:id" component={Profile} />
-        <Route component={NotFound} />
-      </Switch>
-    </ErrorBoundary>
-  );
-}
-
-function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-        <Router />
-      </WouterRouter>
-      <Toaster />
-    </QueryClientProvider>
-  );
-}
-
-export default App;
