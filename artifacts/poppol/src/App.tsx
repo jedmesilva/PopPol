@@ -592,9 +592,10 @@ function FilterSheet({
   const cityOptions = country && state ? GEO[country].states[state].cities.map((c) => ({ value: c, label: c })) : [];
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-end" }}>
+    <div className="poppol-modal-overlay" style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-end" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.72)" }} />
       <div
+        className="poppol-modal poppol-filter-modal"
         style={{
           position: "relative",
           width: "100%",
@@ -1214,9 +1215,10 @@ function ItemPickerSheet({ cart, onAddOne, onSetQty, onClose }) {
   }, [query]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 75, display: "flex", alignItems: "flex-end" }}>
+    <div className="poppol-modal-overlay" style={{ position: "fixed", inset: 0, zIndex: 75, display: "flex", alignItems: "flex-end" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.82)" }} />
       <div
+        className="poppol-modal poppol-picker-modal"
         style={{
           position: "relative",
           width: "100%",
@@ -1577,9 +1579,10 @@ function DetailModal({ p, sentForP, onClose, onSend, onShare }) {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "flex-end" }}>
+    <div className="poppol-modal-overlay" style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "flex-end" }}>
       <div onClick={paying ? undefined : onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.78)" }} />
       <div
+        className="poppol-modal poppol-detail-modal"
         style={{
           position: "relative",
           width: "100%",
@@ -1966,6 +1969,65 @@ export default function PopPolTreemap() {
         @keyframes poppol-toast-in {
           from { transform: translate(-50%, -8px); opacity: 0; }
           to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .poppol-modal-overlay {
+          padding: 0;
+        }
+        .poppol-modal {
+          box-sizing: border-box;
+        }
+        @media (min-width: 700px) {
+          .poppol-modal-overlay {
+            align-items: center !important;
+            padding: 28px !important;
+          }
+          .poppol-modal {
+            width: min(100%, 760px) !important;
+            max-width: 760px !important;
+            max-height: min(820px, calc(100vh - 56px)) !important;
+            border: 1px solid #343947 !important;
+            border-radius: 24px !important;
+            box-shadow: 0 24px 80px rgba(0,0,0,0.48), 0 4px 18px rgba(0,0,0,0.24);
+          }
+          .poppol-filter-modal {
+            width: min(100%, 620px) !important;
+            max-width: 620px !important;
+            max-height: min(680px, calc(100vh - 56px)) !important;
+            padding: 24px 28px 28px !important;
+          }
+          .poppol-picker-modal {
+            width: min(100%, 820px) !important;
+            max-width: 820px !important;
+            height: min(760px, calc(100vh - 56px)) !important;
+            max-height: min(760px, calc(100vh - 56px)) !important;
+          }
+          .poppol-detail-modal {
+            width: min(100%, 940px) !important;
+            max-width: 940px !important;
+            height: min(820px, calc(100vh - 56px)) !important;
+            max-height: min(820px, calc(100vh - 56px)) !important;
+          }
+          .poppol-detail-modal > div:first-child {
+            scrollbar-width: thin;
+            scrollbar-color: #3C4250 transparent;
+          }
+          .poppol-detail-modal img {
+            max-height: 440px;
+          }
+        }
+        @media (max-width: 699px) {
+          .poppol-modal-overlay {
+            padding: 0 !important;
+          }
+          .poppol-modal {
+            max-width: 100% !important;
+          }
+        }
+        @media (min-width: 1100px) {
+          .poppol-detail-modal {
+            width: min(100%, 1040px) !important;
+            max-width: 1040px !important;
+          }
         }
         .poppol-spin { animation: poppol-spin-anim 0.8s linear infinite; }
         @keyframes poppol-spin-anim {
