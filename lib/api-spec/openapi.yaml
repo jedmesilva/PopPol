@@ -10,6 +10,10 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: politicians
+    description: Political profiles and discovery
+  - name: activity
+    description: Public civic activity
 paths:
   /healthz:
     get:
@@ -24,6 +28,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /politicians:
+    get:
+      operationId: listPoliticians
+      tags: [politicians]
+      summary: List politicians
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: level
+          in: query
+          schema: { type: string, enum: [federal, estadual, municipal] }
+        - name: region
+          in: query
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [relevancia, apoio, critica] }
+      responses:
+        "200":
+          description: Politician list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Politician" }
+  /politicians/{id}:
+    get:
+      operationId: getPolitician
+      tags: [politicians]
+      summary: Get a politician profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Politician profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PoliticianProfile" }
+        "404":
+          description: Not found
+  /politicians/{id}/manifestations:
+    post:
+      operationId: createManifestation
+      tags: [politicians]
+      summary: Register a civic manifestation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManifestationInput" }
+      responses:
+        "201":
+          description: Created manifestation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifestation" }
+  /activity:
+    get:
+      operationId: listActivity
+      tags: [activity]
+      summary: List recent public activity
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ActivityItem" }
+  /stats/overview:
+    get:
+      operationId: getOverviewStats
+      tags: [activity]
+      summary: Get platform overview statistics
+      responses:
+        "200":
+          description: Overview statistics
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OverviewStats" }
 components:
   schemas:
     HealthStatus:
@@ -33,4 +126,83 @@ components:
           type: string
       required:
         - status
+    Party:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        color: { type: string }
+      required: [code, name, color]
+    ManifestationItem:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [apoio, critica] }
+        weight: { type: number }
+      required: [id, label, kind, weight]
+    Politician:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        initials: { type: string }
+        role: { type: string }
+        level: { type: string }
+        region: { type: string }
+        party: { $ref: "#/components/schemas/Party" }
+        score: { type: number }
+        support: { type: number }
+        criticism: { type: number }
+        trend: { type: number }
+        position: { type: number }
+      required: [id, name, initials, role, level, region, party, score, support, criticism, trend, position]
+    PoliticianProfile:
+      allOf:
+        - $ref: "#/components/schemas/Politician"
+        - type: object
+          properties:
+            bio: { type: string }
+            mandates: { type: array, items: { type: string } }
+            recentActivity:
+              type: array
+              items: { $ref: "#/components/schemas/ActivityItem" }
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/ManifestationItem" }
+          required: [bio, mandates, recentActivity, items]
+    ManifestationInput:
+      type: object
+      properties:
+        itemId: { type: string }
+        note: { type: ["string", "null"], maxLength: 280 }
+      required: [itemId]
+    Manifestation:
+      type: object
+      properties:
+        id: { type: string }
+        politicianId: { type: string }
+        item: { $ref: "#/components/schemas/ManifestationItem" }
+        createdAt: { type: string, format: date-time }
+        note: { type: ["string", "null"] }
+      required: [id, politicianId, item, createdAt, note]
+    ActivityItem:
+      type: object
+      properties:
+        id: { type: string }
+        politicianId: { type: string }
+        politicianName: { type: string }
+        itemLabel: { type: string }
+        kind: { type: string, enum: [apoio, critica] }
+        createdAt: { type: string, format: date-time }
+        region: { type: string }
+      required: [id, politicianId, politicianName, itemLabel, kind, createdAt, region]
+    OverviewStats:
+      type: object
+      properties:
+        totalPoliticians: { type: number }
+        totalManifestations: { type: number }
+        activeRegions: { type: number }
+        supportPercentage: { type: number }
+      required: [totalPoliticians, totalManifestations, activeRegions, supportPercentage]
 

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "PopPol — Popularidade Política"
+description = "Uma plataforma cívica que ajuda pessoas a descobrir políticos, entender sua popularidade e registrar apoio ou crítica de forma transparente e responsável."
+version = "1.0.0"
+id = "artifacts/poppol"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26053
+
+[services.development]
+run = "pnpm --filter @workspace/poppol run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/poppol", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/poppol/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26053"
+BASE_PATH = "/"

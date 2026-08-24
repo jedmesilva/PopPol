@@ -1,6 +1,6 @@
-# [Project name]
+# PopPol — Popularidade Política
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Plataforma cívica para descobrir políticos, acompanhar contexto e registrar apoio ou crítica de forma transparente.
 
 ## Run & Operate
 
@@ -22,15 +22,20 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/poppol/src/App.tsx` — interface de descoberta e perfis públicos.
+- `artifacts/poppol/src/index.css` — tokens visuais e responsividade.
+- `lib/api-spec/openapi.yaml` — contrato da API e fonte dos hooks gerados.
+- `artifacts/api-server/src/routes/politicians.ts` — dados e endpoints públicos de políticos, atividade e manifestações.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- A manifestação é tratada como participação cívica contextualizada, com apoio e crítica separados visualmente.
+- O ranking usa um índice público composto por apoio menos crítica, sem ocultar políticos com índice baixo.
+- A interface evita linguagem de ataque pessoal e mantém o foco em cargos, contexto e histórico.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Usuários podem pesquisar e filtrar representantes por nível e região, explorar um perfil com biografia, mandatos, histórico e sentimento público, e registrar uma manifestação com feedback imediato.
 
 ## User preferences
 
@@ -38,7 +43,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- O contrato OpenAPI precisa ser atualizado antes de regenerar os clientes com `pnpm --filter @workspace/api-spec run codegen`.
+- Os workflows gerenciados são `artifacts/api-server: API Server` e `artifacts/poppol: web`.
 
 ## Pointers
 
