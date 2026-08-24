@@ -83,9 +83,10 @@ const TIER_BASE_WEIGHTS = [40, 25, 10, 4];
 const MIN_CELL_VALUE = 20; // piso pro político nunca sumir do mapa, mesmo com saldo bem negativo
 
 function normalizeItem(item) {
+  const type = item.type ?? item.kind;
   return {
     ...item,
-    type: item.type === "critica" ? "rejeicao" : item.type,
+    type: type === "critica" ? "rejeicao" : type,
     value: item.weight,
   };
 }
@@ -1537,7 +1538,7 @@ function CheckoutView({ p, cart, cartEntries, cartTotalCents, previewDelta, onBa
   );
 }
 
-function DetailModal({ p, onClose, onSend, onShare }) {
+const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShare }) {
   const cardImg = cardPortraitDataUri(p.id, p.initials);
   const [cart, setCart] = useState({}); // { itemId: qty }
   const [stage, setStage] = useState("browse"); // 'browse' | 'checkout'
@@ -1866,7 +1867,7 @@ function DetailModal({ p, onClose, onSend, onShare }) {
       )}
     </div>
   );
-}
+});
 
 export default function PopPolTreemap() {
   const [query, setQuery] = useState("");
