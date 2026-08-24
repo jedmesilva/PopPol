@@ -43,6 +43,15 @@ paths:
         - name: region
           in: query
           schema: { type: string }
+        - name: country
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: city
+          in: query
+          schema: { type: string }
         - name: sort
           in: query
           schema: { type: string, enum: [relevancia, apoio, critica] }
@@ -140,7 +149,11 @@ components:
         label: { type: string }
         kind: { type: string, enum: [apoio, critica] }
         weight: { type: number }
-      required: [id, label, kind, weight]
+        tier: { type: number }
+        emoji: { type: string }
+        hint: { type: string }
+        priceCents: { type: number }
+      required: [id, label, kind, weight, tier, emoji, hint, priceCents]
     Politician:
       type: object
       properties:
@@ -150,13 +163,21 @@ components:
         role: { type: string }
         level: { type: string }
         region: { type: string }
+        countryCode: { type: string }
+        countryName: { type: string }
+        stateCode: { type: string }
+        stateName: { type: string }
+        city: { type: ["string", "null"] }
         party: { $ref: "#/components/schemas/Party" }
         score: { type: number }
         support: { type: number }
         criticism: { type: number }
         trend: { type: number }
         position: { type: number }
-      required: [id, name, initials, role, level, region, party, score, support, criticism, trend, position]
+        baseByItem:
+          type: object
+          additionalProperties: { type: number }
+      required: [id, name, initials, role, level, region, countryCode, countryName, stateCode, stateName, city, party, score, support, criticism, trend, position, baseByItem]
     PoliticianProfile:
       allOf:
         - $ref: "#/components/schemas/Politician"
@@ -175,6 +196,7 @@ components:
       type: object
       properties:
         itemId: { type: string }
+        quantity: { type: number, minimum: 1, maximum: 99, default: 1 }
         note: { type: ["string", "null"], maxLength: 280 }
       required: [itemId]
     Manifestation:
@@ -183,9 +205,10 @@ components:
         id: { type: string }
         politicianId: { type: string }
         item: { $ref: "#/components/schemas/ManifestationItem" }
+        quantity: { type: number }
         createdAt: { type: string, format: date-time }
         note: { type: ["string", "null"] }
-      required: [id, politicianId, item, createdAt, note]
+      required: [id, politicianId, item, quantity, createdAt, note]
     ActivityItem:
       type: object
       properties:

@@ -24,6 +24,9 @@ export const ListPoliticiansQueryParams = zod.object({
   "q": zod.coerce.string().optional(),
   "level": zod.enum(['federal', 'estadual', 'municipal']).optional(),
   "region": zod.coerce.string().optional(),
+  "country": zod.coerce.string().optional(),
+  "state": zod.coerce.string().optional(),
+  "city": zod.coerce.string().optional(),
   "sort": zod.enum(['relevancia', 'apoio', 'critica']).optional()
 })
 
@@ -34,6 +37,11 @@ export const ListPoliticiansResponseItem = zod.object({
   "role": zod.string(),
   "level": zod.string(),
   "region": zod.string(),
+  "countryCode": zod.string(),
+  "countryName": zod.string(),
+  "stateCode": zod.string(),
+  "stateName": zod.string(),
+  "city": zod.string().nullable(),
   "party": zod.object({
   "code": zod.string(),
   "name": zod.string(),
@@ -43,7 +51,8 @@ export const ListPoliticiansResponseItem = zod.object({
   "support": zod.number(),
   "criticism": zod.number(),
   "trend": zod.number(),
-  "position": zod.number()
+  "position": zod.number(),
+  "baseByItem": zod.record(zod.string(), zod.number())
 })
 export const ListPoliticiansResponse = zod.array(ListPoliticiansResponseItem)
 
@@ -62,6 +71,11 @@ export const GetPoliticianResponse = zod.object({
   "role": zod.string(),
   "level": zod.string(),
   "region": zod.string(),
+  "countryCode": zod.string(),
+  "countryName": zod.string(),
+  "stateCode": zod.string(),
+  "stateName": zod.string(),
+  "city": zod.string().nullable(),
   "party": zod.object({
   "code": zod.string(),
   "name": zod.string(),
@@ -71,7 +85,8 @@ export const GetPoliticianResponse = zod.object({
   "support": zod.number(),
   "criticism": zod.number(),
   "trend": zod.number(),
-  "position": zod.number()
+  "position": zod.number(),
+  "baseByItem": zod.record(zod.string(), zod.number())
 }).and(zod.object({
   "bio": zod.string(),
   "mandates": zod.array(zod.string()),
@@ -88,7 +103,11 @@ export const GetPoliticianResponse = zod.object({
   "id": zod.string(),
   "label": zod.string(),
   "kind": zod.enum(['apoio', 'critica']),
-  "weight": zod.number()
+  "weight": zod.number(),
+  "tier": zod.number(),
+  "emoji": zod.string(),
+  "hint": zod.string(),
+  "priceCents": zod.number()
 }))
 }))
 
@@ -100,12 +119,16 @@ export const CreateManifestationParams = zod.object({
   "id": zod.coerce.string()
 })
 
+export const createManifestationBodyQuantityDefault = 1;
+export const createManifestationBodyQuantityMax = 99;
+
 export const createManifestationBodyNoteMax = 280;
 
 
 
 export const CreateManifestationBody = zod.object({
   "itemId": zod.string(),
+  "quantity": zod.number().min(1).max(createManifestationBodyQuantityMax).default(createManifestationBodyQuantityDefault),
   "note": zod.string().max(createManifestationBodyNoteMax).nullish()
 })
 
@@ -116,8 +139,13 @@ export const CreateManifestationResponse = zod.object({
   "id": zod.string(),
   "label": zod.string(),
   "kind": zod.enum(['apoio', 'critica']),
-  "weight": zod.number()
+  "weight": zod.number(),
+  "tier": zod.number(),
+  "emoji": zod.string(),
+  "hint": zod.string(),
+  "priceCents": zod.number()
 }),
+  "quantity": zod.number(),
   "createdAt": zod.coerce.date(),
   "note": zod.string().nullable()
 })

@@ -11,6 +11,7 @@ export interface Manifestation {
   id: string;
   politicianId: string;
   item: ManifestationItem;
+  quantity: number;
   createdAt: Date;
   /** @nullable */
   note: string | null;

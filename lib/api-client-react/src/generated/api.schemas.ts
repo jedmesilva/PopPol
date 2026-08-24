@@ -28,7 +28,13 @@ export interface ManifestationItem {
   label: string;
   kind: ManifestationItemKind;
   weight: number;
+  tier: number;
+  emoji: string;
+  hint: string;
+  priceCents: number;
 }
+
+export type PoliticianBaseByItem = {[key: string]: number};
 
 export interface Politician {
   id: string;
@@ -37,12 +43,19 @@ export interface Politician {
   role: string;
   level: string;
   region: string;
+  countryCode: string;
+  countryName: string;
+  stateCode: string;
+  stateName: string;
+  /** @nullable */
+  city: string | null;
   party: Party;
   score: number;
   support: number;
   criticism: number;
   trend: number;
   position: number;
+  baseByItem: PoliticianBaseByItem;
 }
 
 export type ActivityItemKind = typeof ActivityItemKind[keyof typeof ActivityItemKind];
@@ -73,6 +86,11 @@ export type PoliticianProfile = Politician & {
 export interface ManifestationInput {
   itemId: string;
   /**
+     * @minimum 1
+     * @maximum 99
+     */
+  quantity?: number;
+  /**
      * @maxLength 280
      * @nullable
      */
@@ -83,6 +101,7 @@ export interface Manifestation {
   id: string;
   politicianId: string;
   item: ManifestationItem;
+  quantity: number;
   createdAt: string;
   /** @nullable */
   note: string | null;
@@ -99,6 +118,9 @@ export type ListPoliticiansParams = {
 q?: string;
 level?: ListPoliticiansLevel;
 region?: string;
+country?: string;
+state?: string;
+city?: string;
 sort?: ListPoliticiansSort;
 };
 

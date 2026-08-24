@@ -9,6 +9,11 @@
 export interface ManifestationInput {
   itemId: string;
   /**
+     * @minimum 1
+     * @maximum 99
+     */
+  quantity?: number;
+  /**
      * @maxLength 280
      * @nullable
      */

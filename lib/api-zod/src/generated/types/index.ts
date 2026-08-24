@@ -19,4 +19,5 @@ export * from './manifestationItemKind';
 export * from './overviewStats';
 export * from './party';
 export * from './politician';
+export * from './politicianBaseByItem';
 export * from './politicianProfile';

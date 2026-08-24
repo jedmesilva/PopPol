@@ -1,138 +1,122 @@
 import { Router, type IRouter } from "express";
+import { and, desc, eq } from "drizzle-orm";
+import { db, poppolItemsTable, poppolManifestationsTable, poppolPartiesTable, poppolPoliticiansTable } from "@workspace/db";
 import {
-  CreateManifestationBody,
-  CreateManifestationParams,
-  CreateManifestationResponse,
-  GetPoliticianParams,
-  GetPoliticianResponse,
-  ListActivityResponse,
-  ListPoliticiansQueryParams,
-  ListPoliticiansResponse,
+  CreateManifestationBody, CreateManifestationParams, CreateManifestationResponse, GetPoliticianParams,
+  GetPoliticianResponse, ListActivityResponse, ListPoliticiansQueryParams, ListPoliticiansResponse,
 } from "@workspace/api-zod";
+import { ensurePoppolSeeded } from "../lib/poppol-data";
 
-type Kind = "apoio" | "critica";
-
-type Party = { code: string; name: string; color: string };
-type Item = { id: string; label: string; kind: Kind; weight: number };
-type Politician = {
-  id: string;
-  name: string;
-  initials: string;
-  role: string;
-  level: string;
-  region: string;
-  party: Party;
-  score: number;
-  support: number;
-  criticism: number;
-  trend: number;
-  position: number;
-  bio: string;
-  mandates: string[];
-  items: Item[];
-};
-
-const parties: Party[] = [
-  { code: "PV", name: "Partido Verde", color: "#8ecb6d" },
-  { code: "C", name: "Cidadania", color: "#e78c58" },
-  { code: "PS", name: "Partido Social", color: "#c97aa5" },
-  { code: "R", name: "Renova", color: "#6ca7c9" },
-];
-
-const items: Item[] = [
-  { id: "aceno", label: "Aceno", kind: "apoio", weight: 1 },
-  { id: "aplausos", label: "Aplausos", kind: "apoio", weight: 4 },
-  { id: "confianca", label: "Voto de confiança", kind: "apoio", weight: 12 },
-  { id: "franzida", label: "Testa franzida", kind: "critica", weight: 1 },
-  { id: "critica", label: "Crítica", kind: "critica", weight: 4 },
-  { id: "repudio", label: "Repúdio", kind: "critica", weight: 12 },
-];
-
-const politicians: Politician[] = [
-  ["ana", "Ana Bezerra", "AB", "Senadora", "federal", "São Paulo", parties[0], 92, 74, 22, 8, "Defende transparência no orçamento e transição energética com foco em empregos locais.", ["Comissão de Meio Ambiente", "Frente pela Transparência"], 185, 41],
-  ["caio", "Caio Nogueira", "CN", "Deputado Federal", "federal", "Minas Gerais", parties[1], 76, 58, 29, 4, "Atua em mobilidade urbana e fortalecimento de serviços públicos nas cidades médias.", ["Comissão de Viação", "Bancada Municipalista"], 120, 48],
-  ["luiza", "Luiza Martins", "LM", "Prefeita", "municipal", "Curitiba, PR", parties[3], 68, 63, 38, -3, "Gestão voltada para clima, zeladoria e qualidade de vida nos bairros.", ["Pacto pelo Clima", "Plano de Calçadas"], 98, 44],
-  ["heitor", "Heitor Campos", "HC", "Governador", "estadual", "Rio de Janeiro", parties[2], 54, 39, 51, -6, "Entre segurança e desenvolvimento, apresenta resultados mistos no primeiro ano de mandato.", ["Plano de Segurança", "Programa Primeiro Emprego"], 72, 51],
-  ["marina", "Marina Duarte", "MD", "Vereadora", "municipal", "Salvador, BA", parties[0], 47, 52, 36, 10, "Representa pautas de cultura, primeira infância e ocupação dos espaços públicos.", ["Conselho de Cultura", "Bairro Vivo"], 66, 39],
-  ["bruno", "Bruno Farias", "BF", "Deputado Estadual", "estadual", "Porto Alegre, RS", parties[1], 39, 35, 49, -2, "Atuação concentrada em orçamento regional e resposta a emergências.", ["Frente de Reconstrução", "Defesa Civil"], 51, 46],
-].map(([id, name, initials, role, level, region, party, score, support, criticism, trend, bio, mandates, supportCount, criticismCount]) => ({
-  id: id as string,
-  name: name as string,
-  initials: initials as string,
-  role: role as string,
-  level: level as string,
-  region: region as string,
-  party: party as Party,
-  score: score as number,
-  support: support as number,
-  criticism: criticism as number,
-  trend: trend as number,
-  position: 0,
-  bio: bio as string,
-  mandates: mandates as string[],
-  items,
-  supportCount: supportCount as number,
-  criticismCount: criticismCount as number,
-})) as Politician[];
-
-politicians.forEach((politician, index) => { politician.position = index + 1; });
-
-const activity = [
-  ["ana", "Ana Bezerra", "Aplausos", "apoio", "São Paulo"],
-  ["luiza", "Luiza Martins", "Voto de confiança", "apoio", "Curitiba, PR"],
-  ["heitor", "Heitor Campos", "Crítica", "critica", "Rio de Janeiro"],
-  ["marina", "Marina Duarte", "Aceno", "apoio", "Salvador, BA"],
-  ["caio", "Caio Nogueira", "Testa franzida", "critica", "Minas Gerais"],
-].map(([politicianId, politicianName, itemLabel, kind, region], index) => ({
-  id: `activity-${index + 1}`,
-  politicianId,
-  politicianName,
-  itemLabel,
-  kind: kind as Kind,
-  createdAt: new Date(Date.now() - index * 1000 * 60 * 19).toISOString(),
-  region,
-}));
+type Item = typeof poppolItemsTable.$inferSelect;
+type Manifestation = typeof poppolManifestationsTable.$inferSelect;
 
 const router: IRouter = Router();
 
-router.get("/politicians", (req, res) => {
+function serializeItem(item: Item) {
+  return { id: item.id, label: item.label, kind: item.type === "apoio" ? "apoio" : "critica", weight: item.weight, tier: item.tier, emoji: item.emoji, hint: item.hint, priceCents: item.priceCents };
+}
+
+function summarize(politician: typeof poppolPoliticiansTable.$inferSelect, party: typeof poppolPartiesTable.$inferSelect, items: Item[], manifestations: Manifestation[]) {
+  const counts = { ...(politician.baseByItem ?? {}) } as Record<string, number>;
+  for (const manifestation of manifestations) counts[manifestation.itemId] = (counts[manifestation.itemId] ?? 0) + manifestation.quantity;
+  let support = 0, criticism = 0;
+  for (const item of items) {
+    const value = (counts[item.id] ?? 0) * item.weight;
+    if (item.type === "apoio") support += value;
+    else criticism += value;
+  }
+  return {
+    id: politician.id, name: politician.name, initials: politician.initials, role: politician.role, level: politician.level,
+    countryCode: politician.countryCode, countryName: politician.countryName, stateCode: politician.stateCode, stateName: politician.stateName,
+    city: politician.city, region: politician.city ? `${politician.city}, ${politician.stateName}` : politician.stateName,
+    party: { code: party.code, name: party.name, color: party.color }, score: support - criticism, support, criticism,
+    trend: 0, position: 0, baseByItem: counts, bio: politician.bio, mandates: politician.mandates, items: items.map(serializeItem),
+  };
+}
+
+async function loadData() {
+  await ensurePoppolSeeded();
+  const [politicians, parties, items, manifestations] = await Promise.all([
+    db.select().from(poppolPoliticiansTable),
+    db.select().from(poppolPartiesTable),
+    db.select().from(poppolItemsTable),
+    db.select().from(poppolManifestationsTable).orderBy(desc(poppolManifestationsTable.createdAt)),
+  ]);
+  return { politicians, parties, items, manifestations };
+}
+
+router.get("/politicians", async (req, res): Promise<void> => {
   const parsed = ListPoliticiansQueryParams.safeParse(req.query);
-  const query = parsed.success ? parsed.data : {};
-  let result = [...politicians];
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const { politicians, parties, items, manifestations } = await loadData();
+  const partyMap = new Map(parties.map((party) => [party.code, party]));
+  let result = politicians.map((politician) => summarize(politician, partyMap.get(politician.partyCode)!, items, manifestations.filter((entry) => entry.politicianId === politician.id)));
+  const query = parsed.data;
   if (query.q) {
     const q = query.q.toLowerCase();
     result = result.filter((p) => `${p.name} ${p.role} ${p.region} ${p.party.name}`.toLowerCase().includes(q));
   }
   if (query.level) result = result.filter((p) => p.level === query.level);
-  if (query.region) result = result.filter((p) => p.region.toLowerCase().includes(query.region!.toLowerCase()));
-  if (query.sort === "apoio") result.sort((a, b) => b.support - a.support);
-  if (query.sort === "critica") result.sort((a, b) => b.criticism - a.criticism);
-  else if (!query.sort || query.sort === "relevancia") result.sort((a, b) => b.score - a.score);
+  if (query.region) {
+    const regionQuery = query.region.toLowerCase();
+    result = result.filter((p) => `${p.region} ${p.countryName}`.toLowerCase().includes(regionQuery));
+  }
+  if (query.country) result = result.filter((p) => p.countryCode === query.country);
+  if (query.state) result = result.filter((p) => p.stateCode === query.state);
+  if (query.city) result = result.filter((p) => p.city === query.city);
+  result.sort((a, b) => query.sort === "apoio" ? b.support - a.support : query.sort === "critica" ? b.criticism - a.criticism : b.score - a.score);
+  result.forEach((p, index) => { p.position = index + 1; });
   res.json(ListPoliticiansResponse.parse(result));
 });
 
-router.get("/politicians/:id", (req, res) => {
-  const parsed = GetPoliticianParams.safeParse(req.params);
-  const politician = parsed.success ? politicians.find((p) => p.id === parsed.data.id) : undefined;
+router.get("/politicians/:id", async (req, res): Promise<void> => {
+  const params = GetPoliticianParams.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const { politicians, parties, items, manifestations } = await loadData();
+  const politician = politicians.find((entry) => entry.id === params.data.id);
   if (!politician) { res.status(404).json({ error: "Político não encontrado" }); return; }
-  res.json(GetPoliticianResponse.parse({ ...politician, recentActivity: activity.filter((a) => a.politicianId === politician.id) }));
+  const party = parties.find((entry) => entry.code === politician.partyCode)!;
+  const summary = summarize(politician, party, items, manifestations.filter((entry) => entry.politicianId === politician.id));
+  const recentActivity = manifestations.filter((entry) => entry.politicianId === politician.id).slice(0, 10).map((entry) => {
+    const item = items.find((candidate) => candidate.id === entry.itemId)!;
+    return { id: entry.id, politicianId: politician.id, politicianName: politician.name, itemLabel: item.label, kind: item.type === "apoio" ? "apoio" : "critica", createdAt: entry.createdAt, region: summary.region };
+  });
+  res.json(GetPoliticianResponse.parse({ ...summary, recentActivity }));
 });
 
-router.post("/politicians/:id/manifestations", (req, res) => {
+router.post("/politicians/:id/manifestations", async (req, res): Promise<void> => {
   const params = CreateManifestationParams.safeParse(req.params);
   const body = CreateManifestationBody.safeParse(req.body);
-  const politician = params.success ? politicians.find((p) => p.id === params.data.id) : undefined;
-  const item = body.success ? items.find((candidate) => candidate.id === body.data.itemId) : undefined;
-  if (!politician || !body.success || !item) { res.status(400).json({ error: "Manifestação inválida" }); return; }
-  if (item.kind === "apoio") politician.support += item.weight;
-  else politician.criticism += item.weight;
-  politician.score = politician.support - politician.criticism;
-  const result = { id: `manifestation-${Date.now()}`, politicianId: politician.id, item, createdAt: new Date().toISOString(), note: body.data.note ?? null };
-  activity.unshift({ id: result.id, politicianId: politician.id, politicianName: politician.name, itemLabel: item.label, kind: item.kind, createdAt: result.createdAt, region: politician.region });
-  res.status(201).json(CreateManifestationResponse.parse(result));
+  if (!params.success || !body.success) { res.status(400).json({ error: "Manifestação inválida" }); return; }
+  await ensurePoppolSeeded();
+  const [politician] = await db.select().from(poppolPoliticiansTable).where(eq(poppolPoliticiansTable.id, params.data.id));
+  const [item] = await db.select().from(poppolItemsTable).where(eq(poppolItemsTable.id, body.data.itemId));
+  if (!politician || !item) { res.status(404).json({ error: "Político ou item não encontrado" }); return; }
+  const quantity = body.data.quantity ?? 1;
+  const [created] = await db.insert(poppolManifestationsTable).values({
+    id: `manifestation-${crypto.randomUUID()}`, politicianId: politician.id, itemId: item.id, quantity, note: body.data.note ?? null,
+  }).returning();
+  res.status(201).json(CreateManifestationResponse.parse({ id: created.id, politicianId: created.politicianId, item: serializeItem(item), quantity: created.quantity, createdAt: created.createdAt, note: created.note }));
 });
 
-router.get("/activity", (_req, res) => res.json(ListActivityResponse.parse(activity.slice(0, 10))));
-router.get("/stats/overview", (_req, res) => res.json({ totalPoliticians: politicians.length, totalManifestations: 1842, activeRegions: 18, supportPercentage: 61 }));
+router.get("/activity", async (_req, res): Promise<void> => {
+  const { politicians, items, manifestations } = await loadData();
+  const politicianMap = new Map(politicians.map((p) => [p.id, p]));
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const activity = manifestations.slice(0, 10).map((entry) => {
+    const politician = politicianMap.get(entry.politicianId)!; const item = itemMap.get(entry.itemId)!;
+    return { id: entry.id, politicianId: politician.id, politicianName: politician.name, itemLabel: item.label, kind: item.type === "apoio" ? "apoio" : "critica", createdAt: entry.createdAt, region: politician.city ? `${politician.city}, ${politician.stateName}` : politician.stateName };
+  });
+  res.json(ListActivityResponse.parse(activity));
+});
+
+router.get("/stats/overview", async (_req, res): Promise<void> => {
+  const { politicians, items, manifestations } = await loadData();
+  const itemMap = new Map(items.map((item) => [item.id, item]));
+  const support = manifestations.reduce((sum, entry) => sum + (itemMap.get(entry.itemId)?.type === "apoio" ? entry.quantity : 0), 0);
+  const criticism = manifestations.reduce((sum, entry) => sum + (itemMap.get(entry.itemId)?.type === "critica" ? entry.quantity : 0), 0);
+  const regions = new Set(politicians.map((p) => `${p.countryCode}:${p.stateCode}`));
+  res.json({ totalPoliticians: politicians.length, totalManifestations: manifestations.reduce((sum, entry) => sum + entry.quantity, 0), activeRegions: regions.size, supportPercentage: support + criticism > 0 ? Math.round((support / (support + criticism)) * 100) : 50 });
+});
 
 export default router;

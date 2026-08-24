@@ -12,4 +12,8 @@ export interface ManifestationItem {
   label: string;
   kind: ManifestationItemKind;
   weight: number;
+  tier: number;
+  emoji: string;
+  hint: string;
+  priceCents: number;
 }

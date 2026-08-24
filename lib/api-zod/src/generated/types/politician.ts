@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Party } from './party';
+import type { PoliticianBaseByItem } from './politicianBaseByItem';
 
 export interface Politician {
   id: string;
@@ -14,10 +15,17 @@ export interface Politician {
   role: string;
   level: string;
   region: string;
+  countryCode: string;
+  countryName: string;
+  stateCode: string;
+  stateName: string;
+  /** @nullable */
+  city: string | null;
   party: Party;
   score: number;
   support: number;
   criticism: number;
   trend: number;
   position: number;
+  baseByItem: PoliticianBaseByItem;
 }

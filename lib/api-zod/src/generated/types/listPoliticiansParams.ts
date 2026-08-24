@@ -12,5 +12,8 @@ export type ListPoliticiansParams = {
 q?: string;
 level?: ListPoliticiansLevel;
 region?: string;
+country?: string;
+state?: string;
+city?: string;
 sort?: ListPoliticiansSort;
 };
