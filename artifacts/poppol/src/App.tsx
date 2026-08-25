@@ -420,6 +420,7 @@ function getActionProfile(item, quantity) {
       duration: 720,
       impactDuration: 420,
       particleCount: 1,
+      impactCount: 1,
       waveCount: 1,
       impactMultiplier: 0.68,
       particleSize: 30,
@@ -430,7 +431,8 @@ function getActionProfile(item, quantity) {
       level,
       duration: 1080,
       impactDuration: 620,
-      particleCount: 3,
+      particleCount: 4,
+      impactCount: 2,
       waveCount: 2,
       impactMultiplier: 1,
       particleSize: 38,
@@ -441,7 +443,8 @@ function getActionProfile(item, quantity) {
       level,
       duration: 1750,
       impactDuration: 920,
-      particleCount: 7,
+      particleCount: 10,
+      impactCount: 4,
       waveCount: 3,
       impactMultiplier: 1.45,
       particleSize: 48,
@@ -452,7 +455,8 @@ function getActionProfile(item, quantity) {
       level,
       duration: 3200,
       impactDuration: 1450,
-      particleCount: 16,
+      particleCount: 30,
+      impactCount: 9,
       waveCount: 5,
       impactMultiplier: 2.35,
       particleSize: 64,
@@ -512,29 +516,38 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
                   }}
                 />
               ))}
-              <motion.span
-                className="poppol-impact-item"
-                initial={{ left: targetX, top: targetY, opacity: 0, scale: 0.18, rotate: -24 }}
-                animate={{
-                  left: targetX,
-                  top: targetY,
-                  opacity: [0, 0, 1, 1, 0],
-                  scale: [0.18, 0.55, profile.level === "apocalyptic" ? 1.55 : 1.2, 1, 0.72],
-                  rotate: [-24, 8, profile.level === "apocalyptic" ? 24 : 10, 0, 8],
-                }}
-                transition={{
-                  duration: profile.duration / 1000,
-                  times: [0, 0.34, 0.43, 0.62, 1],
-                  ease: [0.16, 0.82, 0.24, 1],
-                }}
-                style={{
-                  color,
-                  fontSize: profile.particleSize * (profile.level === "apocalyptic" ? 1.22 : 1),
-                  filter: `drop-shadow(0 4px ${profile.level === "apocalyptic" ? 22 : 12}px ${color})`,
-                }}
-              >
-                {item.emoji}
-              </motion.span>
+              {Array.from({ length: profile.impactCount }, (_, impactIndex) => {
+                const impactDrift = ((hashSeed(`${effect.id}-impact-${impactIndex}`) % 100) - 50) / 100;
+                const hitX = targetX + impactDrift * Math.min(target.width * 0.42, 110);
+                const hitY = targetY + (((hashSeed(`${effect.id}-impact-y-${impactIndex}`) % 100) - 50) / 100) * Math.min(target.height * 0.3, 70);
+                return (
+                  <motion.span
+                    key={`impact-${impactIndex}`}
+                    className="poppol-impact-item"
+                    initial={{ left: targetX, top: targetY, opacity: 0, scale: 0.18, rotate: -24 }}
+                    animate={{
+                      left: hitX,
+                      top: hitY,
+                      opacity: [0, 0, 1, 1, 0],
+                      scale: [0.18, 0.55, profile.level === "apocalyptic" ? 1.55 : 1.2, 1, 0.72],
+                      rotate: [-24, 8 + impactDrift * 20, profile.level === "apocalyptic" ? 24 : 10, 0, 8],
+                    }}
+                    transition={{
+                      duration: profile.duration / 1000,
+                      delay: impactIndex * (profile.level === "apocalyptic" ? 0.045 : 0.025),
+                      times: [0, 0.34, 0.43, 0.62, 1],
+                      ease: [0.16, 0.82, 0.24, 1],
+                    }}
+                    style={{
+                      color,
+                      fontSize: profile.particleSize * (profile.level === "apocalyptic" ? 1.22 : 1),
+                      filter: `drop-shadow(0 4px ${profile.level === "apocalyptic" ? 22 : 12}px ${color})`,
+                    }}
+                  >
+                    {item.emoji}
+                  </motion.span>
+                );
+              })}
               <span className="poppol-action-rain">
                 {Array.from({ length: profile.particleCount }, (_, index) => {
                   const drift = ((hashSeed(`${effect.id}-${index}`) % 100) - 50) / 100;
