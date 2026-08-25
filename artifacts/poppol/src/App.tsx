@@ -1814,6 +1814,9 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
       await onSend([{ item: actionSelection.item, qty: actionSelection.quantity }]);
       setPaymentStatus("confirmed");
       setCart({});
+      // A confirmação deve devolver o usuário ao mapa: o efeito realtime
+      // fica na tela principal e não pode ser escondido pelo modal.
+      onClose();
     } catch {
       setPaymentStatus("failed");
     } finally {
