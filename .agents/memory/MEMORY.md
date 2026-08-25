@@ -1,1 +1,2 @@
 - [Stripe opcional no desenvolvimento](stripe-optional-development.md) — a API deve subir mesmo sem conexão Stripe; checkout e sincronização ficam indisponíveis até conectar.
+- [Registro de artefatos importados](imported-artifact-registration.md) — artifact.toml pode existir mesmo quando o registro de preview ainda está vazio.
