@@ -2,7 +2,7 @@
 // Backend/API contracts are typed and validated at their boundaries.
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, Minus, Plus, Loader2, Trash2, LayoutGrid, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, Minus, Plus, Loader2, Trash2, TrendingUp, TrendingDown } from "lucide-react";
 import { useGetPolitician, useListPoliticians } from "@workspace/api-client-react";
 
 /* ------------------------------------------------------------------
@@ -68,10 +68,6 @@ const APOIO_ITEMS = ITEMS.filter((it) => it.type === "apoio");
 const REJEICAO_ITEMS = ITEMS.filter((it) => it.type === "rejeicao");
 // Lista única, com itens dos dois lados intercalados por tier — é o
 // que aparece na interface pro usuário, sem separar por rótulo.
-// Categorias neutras (por raridade/tier) usadas no catálogo completo —
-// cada categoria mistura itens dos dois lados, sem nomear "apoio" ou
-// "crítica" em lugar nenhum da interface.
-const CATEGORY_LABELS = ["Itens do dia a dia", "Itens populares", "Itens de destaque", "Itens raros"];
 // Pesos usados só pra gerar a distribuição inicial (fictícia) de itens
 // já recebidos por cada político — na mesma ordem de cada lista acima,
 // itens leves aparecem com muito mais frequência que os pesados.
@@ -1176,9 +1172,8 @@ function GridItemCard({ item, inCart, flashing, onTap, onHold }) {
   );
 }
 
-// Catálogo completo em tela cheia — pensado pra listas de itens muito
-// maiores do que cabem na tira. Agrupa por lado (apoio / crítica) e
-// tem busca no topo; abre por cima do modal de detalhe.
+// Catálogo de uma ação em tela cheia. Mostra todos os itens do lado
+// escolhido em uma única grade, com busca no topo.
 function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, onClose }) {
   const [query, setQuery] = useState("");
   const [qtyItem, setQtyItem] = useState(null);
@@ -1193,16 +1188,13 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, 
 
   useEffect(() => () => flashTimer.current && clearTimeout(flashTimer.current), []);
 
-  const groups = useMemo(() => {
+  const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matches = (item) =>
+    return items.filter((item) =>
       item.type === actionType &&
-      (!q || item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q));
-    return CATEGORY_LABELS.map((label, tier) => ({
-      label,
-      items: items.filter((it) => it.tier === tier && matches(it)),
-    })).filter((g) => g.items.length > 0);
-  }, [query, items]);
+      (!q || item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q))
+    );
+  }, [query, items, actionType]);
 
   return (
     <div className="poppol-modal-overlay" style={{ position: "fixed", inset: 0, zIndex: 75, display: "flex", alignItems: "flex-end" }}>
@@ -1285,43 +1277,26 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, 
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 20px 20px", WebkitOverflowScrolling: "touch" }}>
-          {groups.length === 0 ? (
+          {filteredItems.length === 0 ? (
             <div style={{ textAlign: "center", color: "#6B7180", fontFamily: "'Inter', sans-serif", fontSize: 13, padding: "40px 0" }}>
               Nenhum item encontrado.
             </div>
           ) : (
-            groups.map(({ label, items }) => (
-              <div key={label} style={{ marginBottom: 22 }}>
-                <div
-                  style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontSize: 11,
-                    fontWeight: 700,
-                    color: "#9096A6",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: 10,
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 12 }}>
+              {filteredItems.map((item) => (
+                <GridItemCard
+                  key={item.id}
+                  item={item}
+                  inCart={cart[item.id] || 0}
+                  flashing={flashId === item.id}
+                  onTap={() => {
+                    flash(item.id);
+                    onAddOne(item.id);
                   }}
-                >
-                  {label}
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 12 }}>
-                  {items.map((item) => (
-                    <GridItemCard
-                      key={item.id}
-                      item={item}
-                      inCart={cart[item.id] || 0}
-                      flashing={flashId === item.id}
-                      onTap={() => {
-                        flash(item.id);
-                        onAddOne(item.id);
-                      }}
-                      onHold={() => setQtyItem(item)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+                  onHold={() => setQtyItem(item)}
+                />
+              ))}
+            </div>
           )}
         </div>
 
