@@ -411,47 +411,54 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
           const target = targetRects[effect.politicianId];
           if (!target) return null;
           const intensity = Math.max(1, item.value * effect.quantity);
-          const count = Math.min(12, 3 + Math.ceil(intensity / 8));
+          const count = Math.min(18, 4 + Math.ceil(intensity / 5));
           const targetX = target.left + target.width / 2;
           const targetY = target.top + target.height / 2;
-          const originX = effect.originX ?? (effect.id.charCodeAt(0) % 2 ? -36 : window.innerWidth + 36);
-          const originY = effect.originY ?? (window.innerHeight * (0.22 + (effect.id.charCodeAt(1) % 45) / 100));
           const color = item.type === "apoio" ? "#4ADE80" : "#E2555F";
+          const impactSize = Math.min(340, Math.max(120, Math.max(target.width, target.height) * 0.9 + intensity * 2));
           return (
             <motion.div
               key={effect.id}
-              initial={{ left: originX, top: originY, opacity: 0, scale: 0.55, rotate: -14 }}
-              animate={{ left: targetX, top: targetY, opacity: 1, scale: 1 + Math.min(0.7, intensity / 90), rotate: 0 }}
-              exit={{ opacity: 0, scale: 0.2 }}
-              transition={{ duration: Math.min(1.55, 0.72 + intensity / 85), ease: [0.16, 1, 0.3, 1] }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
               onAnimationComplete={() => onDone(effect.id)}
-              style={{
-                position: "fixed",
-                width: Math.min(116, 58 + intensity * 1.4),
-                height: Math.min(116, 58 + intensity * 1.4),
-                marginLeft: -Math.min(58, 29 + intensity * 0.7),
-                marginTop: -Math.min(58, 29 + intensity * 0.7),
-                display: "grid",
-                placeItems: "center",
-                fontSize: Math.min(62, 32 + intensity * 0.7),
-                filter: `drop-shadow(0 0 ${Math.min(24, 8 + intensity / 3)}px ${color})`,
-              }}
+              style={{ position: "fixed", inset: 0 }}
             >
-              <span className="poppol-action-trail" style={{ background: `linear-gradient(90deg, transparent, ${color}88, transparent)` }} />
-              <span className="poppol-action-orb" style={{ borderColor: `${color}99`, boxShadow: `0 0 28px ${color}88, inset 0 0 16px ${color}44` }}>
-                {item.emoji}
-              </span>
-              <span className="poppol-action-particles">
-                {Array.from({ length: count }, (_, index) => (
-                  <i
-                    key={index}
-                    style={{
-                      background: color,
-                      transform: `rotate(${index * (360 / count)}deg) translateY(-${24 + (index % 3) * 10}px)`,
-                      animationDelay: `${(index % 4) * 55}ms`,
-                    }}
-                  />
-                ))}
+              <span className="poppol-impact-wash" style={{ left: targetX, top: targetY, width: impactSize, height: impactSize, background: `radial-gradient(circle, ${color}30 0%, transparent 68%)` }} />
+              {[0, 1, 2].map((wave) => (
+                <span
+                  key={wave}
+                  className="poppol-impact-wave"
+                  style={{
+                    left: targetX,
+                    top: targetY,
+                    width: impactSize * (0.48 + wave * 0.18),
+                    height: impactSize * (0.48 + wave * 0.18),
+                    borderColor: `${color}${wave === 0 ? "CC" : "88"}`,
+                    animationDelay: `${wave * 180}ms`,
+                  }}
+                />
+              ))}
+              <span className="poppol-action-rain">
+                {Array.from({ length: count }, (_, index) => {
+                  const drift = ((hashSeed(`${effect.id}-${index}`) % 100) - 50) / 100;
+                  const x = targetX + drift * Math.min(target.width * 0.9, 180);
+                  const dropY = targetY + (index % 3) * 8;
+                  return (
+                    <motion.span
+                      key={index}
+                      initial={{ left: x, top: -72 - (index % 4) * 58, opacity: 0, scale: 0.62, rotate: -18 + (index % 5) * 9 }}
+                      animate={{ left: x + drift * 18, top: dropY, opacity: [0, 1, 1, 0], scale: [0.62, 1, 1, 0.76], rotate: 4 + drift * 20 }}
+                      transition={{ duration: 0.95 + (index % 4) * 0.12, delay: (index % 6) * 0.07, ease: [0.2, 0.8, 0.25, 1] }}
+                      className="poppol-rain-item"
+                      style={{ filter: `drop-shadow(0 3px 8px ${color}88)` }}
+                    >
+                      {item.emoji}
+                    </motion.span>
+                  );
+                })}
               </span>
             </motion.div>
           );
@@ -2413,43 +2420,41 @@ export default function PopPolTreemap() {
           54% { transform: translate(-2px, 1px) scale(1.012); }
         }
         .poppol-cell-impact { animation: poppol-cell-impact 620ms cubic-bezier(.36,.07,.19,.97); z-index: 4; }
-        .poppol-action-orb {
-          position: relative;
-          z-index: 2;
-          width: 1em;
-          height: 1em;
-          display: grid;
-          place-items: center;
+        .poppol-impact-wash {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          border-radius: 50%;
+          pointer-events: none;
+          animation: poppol-impact-wash 1100ms ease-out both;
+        }
+        .poppol-impact-wave {
+          position: absolute;
+          transform: translate(-50%, -50%);
           border: 2px solid;
           border-radius: 50%;
-          background: rgba(12,13,18,0.7);
-          backdrop-filter: blur(5px);
+          box-sizing: border-box;
+          animation: poppol-impact-wave 980ms cubic-bezier(.16,.8,.24,1) both;
         }
-        .poppol-action-trail {
+        .poppol-action-rain { position: absolute; inset: 0; }
+        .poppol-rain-item {
           position: absolute;
-          width: 190%;
-          height: 3px;
-          transform: rotate(-18deg);
-          opacity: 0.7;
-          filter: blur(2px);
+          transform: translate(-50%, -50%);
+          font-size: clamp(24px, 3.4vw, 54px);
+          line-height: 1;
+          will-change: top, left, transform, opacity;
         }
-        .poppol-action-particles { position: absolute; inset: 0; }
-        .poppol-action-particles i {
-          position: absolute;
-          left: calc(50% - 3px);
-          top: calc(50% - 3px);
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          animation: poppol-action-particle 720ms ease-out both;
+        @keyframes poppol-impact-wash {
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(.55); }
+          24% { opacity: .9; transform: translate(-50%, -50%) scale(1); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(1.45); }
         }
-        @keyframes poppol-action-particle {
-          from { opacity: 0; transform: rotate(0deg) translateY(0) scale(0.4); }
-          25% { opacity: 1; }
-          to { opacity: 0; }
+        @keyframes poppol-impact-wave {
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(.35); }
+          12% { opacity: .9; }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .poppol-cell-impact, .poppol-action-particles i { animation: none; }
+          .poppol-cell-impact, .poppol-impact-wash, .poppol-impact-wave, .poppol-rain-item { animation: none; }
         }
       `}</style>
 
