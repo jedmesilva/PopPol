@@ -1866,6 +1866,16 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
                       return (
                         <div
                           key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Escolher intensidade para ${item.label}`}
+                          onClick={() => setSelectedActionItem(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedActionItem(item);
+                            }
+                          }}
                           style={{
                             display: "flex",
                             flexDirection: "column",
@@ -1875,6 +1885,8 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
                             border: "1px solid #2A2E3A",
                             borderRadius: 14,
                             padding: "12px 6px 10px",
+                            cursor: "pointer",
+                            transition: "transform 160ms ease, border-color 160ms ease",
                           }}
                         >
                           <span style={{ fontSize: 26, lineHeight: 1 }}>{item.emoji}</span>
