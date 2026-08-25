@@ -417,7 +417,8 @@ function getActionProfile(item, quantity) {
   const profiles = {
     light: {
       level,
-      duration: 1050,
+      duration: 720,
+      impactDuration: 420,
       particleCount: 1,
       waveCount: 1,
       impactMultiplier: 0.68,
@@ -427,7 +428,8 @@ function getActionProfile(item, quantity) {
     },
     moderate: {
       level,
-      duration: 1650,
+      duration: 1080,
+      impactDuration: 620,
       particleCount: 3,
       waveCount: 2,
       impactMultiplier: 1,
@@ -437,7 +439,8 @@ function getActionProfile(item, quantity) {
     },
     strong: {
       level,
-      duration: 2450,
+      duration: 1750,
+      impactDuration: 920,
       particleCount: 7,
       waveCount: 3,
       impactMultiplier: 1.45,
@@ -447,7 +450,8 @@ function getActionProfile(item, quantity) {
     },
     apocalyptic: {
       level,
-      duration: 4600,
+      duration: 3200,
+      impactDuration: 1450,
       particleCount: 16,
       waveCount: 5,
       impactMultiplier: 2.35,
@@ -484,7 +488,13 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
               transition={{ duration: 0.15 }}
               onAnimationComplete={() => onDone(effect.id)}
               className={`poppol-action-effect poppol-action-${profile.level}`}
-              style={{ position: "fixed", inset: 0, "--action-duration": `${profile.duration}ms`, "--action-color": color }}
+              style={{
+                position: "fixed",
+                inset: 0,
+                "--action-duration": `${profile.duration}ms`,
+                "--impact-duration": `${profile.impactDuration}ms`,
+                "--action-color": color,
+              }}
             >
               {profile.flash && <span className="poppol-apocalypse-flash" style={{ background: `${color}26` }} />}
               <span className="poppol-impact-wash" style={{ left: targetX, top: targetY, width: impactSize, height: impactSize, background: `radial-gradient(circle, ${color}55 0%, ${color}1C 32%, transparent 70%)` }} />
@@ -768,7 +778,7 @@ function FilterSheet({
           borderTop: "1px solid #2A2E3A",
           borderRadius: "22px 22px 0 0",
           padding: "18px 20px 26px",
-          animation: "poppol-sheet-up 220ms ease",
+          animation: "poppol-sheet-up 140ms cubic-bezier(.22,1,.36,1)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
@@ -1353,7 +1363,7 @@ function ActionIntensitySheet({ item, initialQty, onClose, onConfirm }) {
           borderTop: `1px solid ${isApocalyptic ? "#E2555F" : meta.color}88`,
           borderRadius: "24px 24px 0 0",
           padding: "20px 20px 22px",
-          animation: "poppol-sheet-up 220ms ease",
+          animation: "poppol-sheet-up 140ms cubic-bezier(.22,1,.36,1)",
           boxShadow: isApocalyptic ? "0 -12px 60px rgba(226,85,95,0.22)" : "0 -12px 50px rgba(0,0,0,0.35)",
         }}
       >
@@ -1476,7 +1486,7 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onSetQty, onSelect, 
           borderTop: "1px solid #2A2E3A",
           borderRadius: "24px 24px 0 0",
           overflow: "hidden",
-          animation: "poppol-sheet-up 220ms ease",
+          animation: "poppol-sheet-up 140ms cubic-bezier(.22,1,.36,1)",
         }}
       >
         <div style={{ padding: "18px 20px 12px", flexShrink: 0 }}>
@@ -1875,10 +1885,10 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
     setPaymentStatus("processing");
     setStage("status");
     try {
-      await new Promise((resolve) => setTimeout(resolve, 950));
+          await new Promise((resolve) => setTimeout(resolve, 350));
       if (paymentMethod === "pix") {
         setPaymentStatus("awaiting");
-        await new Promise((resolve) => setTimeout(resolve, 1150));
+            await new Promise((resolve) => setTimeout(resolve, 500));
       }
       await onSend([{ item: actionSelection.item, qty: actionSelection.quantity }]);
       setPaymentStatus("confirmed");
@@ -1910,7 +1920,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
           borderTop: "1px solid #2A2E3A",
           borderRadius: "24px 24px 0 0",
           overflow: "hidden",
-          animation: "poppol-sheet-up 220ms ease",
+          animation: "poppol-sheet-up 140ms cubic-bezier(.22,1,.36,1)",
         }}
       >
         {stage === "checkout" && actionSelection ? (
@@ -2538,7 +2548,7 @@ export default function PopPolTreemap() {
           transform: translate(-50%, -50%);
           border-radius: 50%;
           pointer-events: none;
-          animation: poppol-impact-wash var(--action-duration) ease-out both;
+          animation: poppol-impact-wash var(--impact-duration) ease-out both;
         }
         .poppol-impact-wave {
           position: absolute;
@@ -2546,7 +2556,7 @@ export default function PopPolTreemap() {
           border: 2px solid;
           border-radius: 50%;
           box-sizing: border-box;
-          animation: poppol-impact-wave var(--action-duration) cubic-bezier(.16,.8,.24,1) both;
+          animation: poppol-impact-wave var(--impact-duration) cubic-bezier(.16,.8,.24,1) both;
         }
         .poppol-action-rain { position: absolute; inset: 0; }
         .poppol-rain-item {
