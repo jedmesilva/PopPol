@@ -512,6 +512,29 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
                   }}
                 />
               ))}
+              <motion.span
+                className="poppol-impact-item"
+                initial={{ left: targetX, top: targetY, opacity: 0, scale: 0.18, rotate: -24 }}
+                animate={{
+                  left: targetX,
+                  top: targetY,
+                  opacity: [0, 0, 1, 1, 0],
+                  scale: [0.18, 0.55, profile.level === "apocalyptic" ? 1.55 : 1.2, 1, 0.72],
+                  rotate: [-24, 8, profile.level === "apocalyptic" ? 24 : 10, 0, 8],
+                }}
+                transition={{
+                  duration: profile.duration / 1000,
+                  times: [0, 0.34, 0.43, 0.62, 1],
+                  ease: [0.16, 0.82, 0.24, 1],
+                }}
+                style={{
+                  color,
+                  fontSize: profile.particleSize * (profile.level === "apocalyptic" ? 1.22 : 1),
+                  filter: `drop-shadow(0 4px ${profile.level === "apocalyptic" ? 22 : 12}px ${color})`,
+                }}
+              >
+                {item.emoji}
+              </motion.span>
               <span className="poppol-action-rain">
                 {Array.from({ length: profile.particleCount }, (_, index) => {
                   const drift = ((hashSeed(`${effect.id}-${index}`) % 100) - 50) / 100;
@@ -2558,6 +2581,13 @@ export default function PopPolTreemap() {
           box-sizing: border-box;
           animation: poppol-impact-wave var(--impact-duration) cubic-bezier(.16,.8,.24,1) both;
         }
+        .poppol-impact-item {
+          position: absolute;
+          z-index: 3;
+          transform: translate(-50%, -50%);
+          line-height: 1;
+          will-change: left, top, transform, opacity;
+        }
         .poppol-action-rain { position: absolute; inset: 0; }
         .poppol-rain-item {
           position: absolute;
@@ -2587,7 +2617,7 @@ export default function PopPolTreemap() {
           100% { opacity: 0; transform: translate(-50%, -50%) scale(1.55); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .poppol-cell-impact, .poppol-impact-wash, .poppol-impact-wave, .poppol-rain-item { animation: none; }
+          .poppol-cell-impact, .poppol-impact-wash, .poppol-impact-wave, .poppol-impact-item, .poppol-rain-item { animation: none; }
         }
       `}</style>
 
