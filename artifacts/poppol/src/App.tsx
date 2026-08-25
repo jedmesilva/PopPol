@@ -2,7 +2,7 @@
 // Backend/API contracts are typed and validated at their boundaries.
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, Minus, Plus, Loader2, Trash2, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, QrCode, Minus, Plus, Loader2, Trash2, TrendingUp, TrendingDown, CheckCircle2, AlertCircle, Clock3, RotateCcw } from "lucide-react";
 import { useGetPolitician, useListPoliticians } from "@workspace/api-client-react";
 
 /* ------------------------------------------------------------------
@@ -257,6 +257,21 @@ function formatBRL(cents) {
   const [intPart, decPart] = value.split(",");
   const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return `R$ ${withThousands},${decPart}`;
+}
+
+function pixQrDataUri(seed) {
+  const hash = hashSeed(seed);
+  const cells = [];
+  for (let y = 0; y < 21; y += 1) {
+    for (let x = 0; x < 21; x += 1) {
+      const finder = (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
+      const finderBorder = finder && (x % 7 === 0 || y % 7 === 0 || x % 7 === 6 || y % 7 === 6);
+      const finderCore = finder && x % 7 >= 2 && x % 7 <= 4 && y % 7 >= 2 && y % 7 <= 4;
+      const filled = finderBorder || finderCore || (!finder && ((hash + x * 17 + y * 31 + x * y) % 5 < 2));
+      if (filled) cells.push(`<rect x="${x + 2}" y="${y + 2}" width="1" height="1" />`);
+    }
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 25"><rect width="25" height="25" fill="white"/> <g fill="#111827">${cells.join("")}</g></svg>`)}`;
 }
 
 const AVATAR_BG = ["F59E0B", "38BDF8", "4ADE80", "F472B6", "A78BFA", "FB7185", "22D3EE", "FBBF24"];
@@ -1434,19 +1449,18 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onSetQty, onSelect, 
   );
 }
 
-// Checkout: revisão da sacola + pagamento simulado (Pix/cartão). Só
-// depois que o pagamento é "aprovado" os itens vão pro sentMap do
-// político — antes disso, nada foi enviado de verdade. Mostra também
-// o efeito líquido que a sacola vai ter no saldo de relevância.
-function CheckoutView({ p, cart, cartEntries, cartTotalCents, previewDelta, onBack, onSetQty, onPay, paying }) {
-  const deltaMeta = previewDelta >= 0 ? TYPE_META.apoio : TYPE_META.rejeicao;
+// Etapa de revisão: um checkout representa exatamente uma ação escolhida.
+function CheckoutView({ p, action, onBack, onChoosePayment }) {
+  const { item, quantity } = action;
+  const meta = TYPE_META[item.type];
+  const totalCents = item.priceCents * quantity;
+  const impact = meta.sign * item.value * quantity;
   return (
     <>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
           <button
             onClick={onBack}
-            disabled={paying}
             style={{
               width: 32,
               height: 32,
@@ -1457,137 +1471,194 @@ function CheckoutView({ p, cart, cartEntries, cartTotalCents, previewDelta, onBa
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              cursor: paying ? "default" : "pointer",
+              cursor: "pointer",
               flexShrink: 0,
             }}
           >
             <ArrowLeft size={16} />
           </button>
           <div>
-            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>
-              Revisar pedido
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>
+                Revisar ação
             </div>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>
-              Itens serão enviados a {p.name}
+              Antes de escolher como pagar
             </div>
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-          {cartEntries.map(({ item, qty }) => {
-            const meta = TYPE_META[item.type];
-            return (
-              <div
-                key={item.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  background: "#1F2330",
-                  border: "1px solid #2A2E3A",
-                  borderRadius: 14,
-                  padding: "10px 12px",
-                }}
-              >
-                <span style={{ fontSize: 22, flexShrink: 0 }}>{item.emoji}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 600, color: "#EDEBE4" }}>
-                    {item.label}
-                  </div>
-                  <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6", display: "flex", gap: 6 }}>
-                    <span>{formatBRL(item.priceCents)} cada</span>
-                    <span style={{ color: meta.color }}>{formatEffect(item)}/un.</span>
-                  </div>
-                </div>
-                {!paying && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 2, background: "#171922", border: "1px solid #2A2E3A", borderRadius: 999, padding: 3, flexShrink: 0 }}>
-                    <button onClick={() => onSetQty(item.id, qty - 1)} style={{ ...stepperBtnStyle, width: 24, height: 24 }}>
-                      <Minus size={11} />
-                    </button>
-                    <span style={{ width: 20, textAlign: "center", fontFamily: "'Inter', sans-serif", fontSize: 12, fontWeight: 700, color: "#EDEBE4" }}>
-                      {qty}
-                    </span>
-                    <button onClick={() => onSetQty(item.id, qty + 1)} style={{ ...stepperBtnStyle, width: 24, height: 24 }}>
-                      <Plus size={11} />
-                    </button>
-                  </div>
-                )}
-                <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4", flexShrink: 0, minWidth: 64, textAlign: "right" }}>
-                  {formatBRL(item.priceCents * qty)}
-                </span>
-              </div>
-            );
-          })}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, background: meta.soft, border: `1px solid ${meta.color}66`, borderRadius: 18, padding: "16px 14px", marginBottom: 14 }}>
+          <div style={{ width: 58, height: 58, borderRadius: 16, background: "#181B24", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 34, flexShrink: 0 }}>
+            {item.emoji}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+              {meta.sign > 0 ? "Defender" : "Atacar"} · {quantity}× força
+            </div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: "#EDEBE4" }}>{item.label}</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#A8ADBA", marginTop: 3 }}>Ação para {p.name}</div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6", marginBottom: 3 }}>Valor</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 18, fontWeight: 700, color: "#EDEBE4" }}>{formatBRL(totalCents)}</div>
+          </div>
         </div>
 
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 14,
-            background: deltaMeta.soft,
-            border: `1px solid ${deltaMeta.color}55`,
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 18,
+            background: "#1F2330", border: "1px solid #2A2E3A",
             borderRadius: 14,
             padding: "12px 14px",
           }}
         >
-          {previewDelta >= 0 ? (
-            <TrendingUp size={16} color={deltaMeta.color} style={{ flexShrink: 0 }} />
-          ) : (
-            <TrendingDown size={16} color={deltaMeta.color} style={{ flexShrink: 0 }} />
-          )}
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#C7CCD6", lineHeight: 1.42, flex: 1 }}>
-            Efeito na popularidade de {p.name}
-          </span>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 700, color: deltaMeta.color, flexShrink: 0 }}>
-            {formatScore(previewDelta)}
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9096A6" }}>Impacto na popularidade</span>
+          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 15, fontWeight: 700, color: meta.color }}>
+            {formatScore(impact)}
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 2px" }}>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 600, color: "#9096A6" }}>
-            Total
-          </span>
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 20, fontWeight: 700, color: "#EDEBE4" }}>
-            {formatBRL(cartTotalCents)}
-          </span>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, color: "#9096A6", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+          Como você quer pagar?
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <button
+            onClick={() => onChoosePayment("card")}
+            style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, textAlign: "left", padding: "15px 14px", borderRadius: 16, border: "1px solid #3A4050", background: "#1F2330", color: "#EDEBE4", cursor: "pointer" }}
+          >
+            <CreditCard size={20} color="#F5B942" />
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 700 }}>Cartão</span>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6" }}>Preencha os dados do cartão</span>
+          </button>
+          <button
+            onClick={() => onChoosePayment("pix")}
+            style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, textAlign: "left", padding: "15px 14px", borderRadius: 16, border: "1px solid #3A4050", background: "#1F2330", color: "#EDEBE4", cursor: "pointer" }}
+          >
+            <QrCode size={20} color="#4ADE80" />
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, fontWeight: 700 }}>Pix</span>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6" }}>Leia o QR Code pelo banco</span>
+          </button>
+        </div>
+        <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 12, background: "#F5B94212", border: "1px solid #F5B94233", color: "#B9A878", fontFamily: "'Inter', sans-serif", fontSize: 10.5, lineHeight: 1.4 }}>
+          Ambiente de demonstração: o pagamento será simulado para você visualizar todo o fluxo.
         </div>
       </div>
+    </>
+  );
+}
 
-      <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px", flexShrink: 0 }}>
-        <button
-          onClick={onPay}
-          disabled={paying}
-          style={{
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: "14px 14px",
-            borderRadius: 999,
-            border: "none",
-            background: "#F5B942",
-            color: "#12141C",
-            fontFamily: "'Inter', sans-serif",
-            fontSize: 13.5,
-            fontWeight: 700,
-            cursor: paying ? "default" : "pointer",
-            opacity: paying ? 0.85 : 1,
-          }}
-        >
-          {paying ? (
-            <>
-              <Loader2 size={16} className="poppol-spin" />
-              Processando pagamento…
-            </>
-          ) : (
-            <>
-              <CreditCard size={16} />
-              {`Pagar ${formatBRL(cartTotalCents)} · Pix ou cartão`}
-            </>
-          )}
+function PaymentView({ p, action, paymentMethod, onBack, onPay, onExpire, paying, paymentStatus, card, setCard }) {
+  const { item, quantity } = action;
+  const meta = TYPE_META[item.type];
+  const totalCents = item.priceCents * quantity;
+  const isPix = paymentMethod === "pix";
+  useEffect(() => {
+    if (!isPix || paymentStatus !== "form") return undefined;
+    const expiryTimer = setTimeout(onExpire, 15 * 60 * 1000);
+    return () => clearTimeout(expiryTimer);
+  }, [isPix, paymentStatus, onExpire]);
+  const statusCopy = {
+    processing: { icon: <Loader2 size={24} className="poppol-spin" />, title: "Processando pagamento", text: "Estamos conferindo sua ação…" },
+    awaiting: { icon: <Clock3 size={24} />, title: "Aguardando pagamento", text: "Assim que o pagamento for identificado, sua ação será confirmada." },
+    failed: { icon: <AlertCircle size={24} />, title: "Pagamento falhou", text: "Não foi possível confirmar o pagamento. Confira os dados e tente novamente." },
+    expired: { icon: <Clock3 size={24} />, title: "Pagamento expirou", text: "O tempo para concluir esta ação acabou. Você pode voltar e gerar uma nova tentativa." },
+    confirmed: { icon: <CheckCircle2 size={24} />, title: "Pagamento confirmado", text: `Sua ação foi registrada para ${p.name}.` },
+  };
+
+  if (paymentStatus && paymentStatus !== "form") {
+    const copy = statusCopy[paymentStatus];
+    const positive = paymentStatus === "confirmed";
+    const waiting = paymentStatus === "awaiting";
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+            <button onClick={onBack} disabled={paymentStatus === "processing"} style={{ ...stepperBtnStyle, width: 32, height: 32, background: "#1B1E27", border: "1px solid #2A2E3A", cursor: paymentStatus === "processing" ? "default" : "pointer" }}>
+              <ArrowLeft size={16} />
+            </button>
+            <div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>Status do pagamento</div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>{item.label} · {formatBRL(totalCents)}</div>
+            </div>
+          </div>
+          <div style={{ borderRadius: 20, padding: "28px 22px", textAlign: "center", background: positive ? "#4ADE8015" : waiting ? "#F5B94215" : "#E2555F15", border: `1px solid ${positive ? "#4ADE8055" : waiting ? "#F5B94255" : "#E2555F55"}` }}>
+            <div style={{ color: positive ? "#4ADE80" : waiting ? "#F5B942" : "#F47B83", display: "flex", justifyContent: "center", marginBottom: 12 }}>{copy.icon}</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 21, fontWeight: 700, color: "#EDEBE4" }}>{copy.title}</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#B8BDC8", lineHeight: 1.5, marginTop: 8 }}>{copy.text}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, padding: "12px 14px", borderRadius: 14, background: "#1F2330", border: "1px solid #2A2E3A" }}>
+            <span style={{ fontSize: 25 }}>{item.emoji}</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4" }}>{meta.sign > 0 ? "Defender" : "Atacar"} {p.name}</div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>{quantity}× {item.label}</div>
+            </div>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700, color: "#EDEBE4" }}>{formatBRL(totalCents)}</span>
+          </div>
+        </div>
+        {paymentStatus === "failed" || paymentStatus === "expired" ? (
+          <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px" }}>
+            <button onClick={onBack} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 999, border: "none", background: "#F5B942", color: "#12141C", fontFamily: "'Inter', sans-serif", fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}>
+              <RotateCcw size={16} /> Tentar novamente
+            </button>
+          </div>
+        ) : paymentStatus === "confirmed" ? (
+          <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px" }}>
+            <button onClick={() => window.location.reload()} style={{ width: "100%", padding: 14, borderRadius: 999, border: "none", background: "#F5B942", color: "#12141C", fontFamily: "'Inter', sans-serif", fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}>Voltar para o mapa</button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 20px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button onClick={onBack} disabled={paying} style={{ ...stepperBtnStyle, width: 32, height: 32, background: "#1B1E27", border: "1px solid #2A2E3A", cursor: paying ? "default" : "pointer" }}><ArrowLeft size={16} /></button>
+          <div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>Dados do pagamento</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>{isPix ? "Escaneie para pagar com Pix" : "Preencha os dados do cartão"}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", borderRadius: 14, background: meta.soft, border: `1px solid ${meta.color}44`, marginBottom: 18 }}>
+          <span style={{ fontSize: 24 }}>{item.emoji}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4" }}>{item.label} · {quantity}× força</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>{isPix ? "Pix" : "Cartão"} · {formatBRL(totalCents)}</div>
+          </div>
+        </div>
+        {isPix ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#C7CCD6", lineHeight: 1.45, marginBottom: 14 }}>Abra o app do seu banco e aponte a câmera para o QR Code abaixo.</div>
+            <div style={{ display: "inline-flex", padding: 12, background: "#FFFFFF", borderRadius: 16, boxShadow: "0 8px 30px rgba(0,0,0,0.28)" }}><img src={pixQrDataUri(`${p.id}-${item.id}-${quantity}`)} alt="QR Code Pix" style={{ width: 178, height: 178, display: "block" }} /></div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 17, fontWeight: 700, color: "#EDEBE4", marginTop: 14 }}>{formatBRL(totalCents)}</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6", marginTop: 4 }}>QR Code válido por 15 minutos</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+            {[
+              ["number", "Número do cartão", "•••• •••• •••• ••••"],
+              ["name", "Nome no cartão", "Como aparece no cartão"],
+            ].map(([key, label, placeholder]) => (
+              <label key={key} style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>
+                {label}
+                <input value={card[key]} onChange={(e) => setCard((current) => ({ ...current, [key]: e.target.value }))} placeholder={placeholder} style={{ boxSizing: "border-box", width: "100%", padding: "12px 13px", borderRadius: 11, border: "1px solid #343947", background: "#1F2330", color: "#EDEBE4", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 13 }} />
+              </label>
+            ))}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11 }}>
+              {[["expiry", "Validade", "MM/AA"], ["cvv", "CVV", "123"]].map(([key, label, placeholder]) => (
+                <label key={key} style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>
+                  {label}
+                  <input value={card[key]} onChange={(e) => setCard((current) => ({ ...current, [key]: e.target.value }))} placeholder={placeholder} style={{ boxSizing: "border-box", width: "100%", padding: "12px 13px", borderRadius: 11, border: "1px solid #343947", background: "#1F2330", color: "#EDEBE4", outline: "none", fontFamily: "'Inter', sans-serif", fontSize: 13 }} />
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", padding: "14px 18px" }}>
+        <button onClick={onPay} disabled={paying} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 14, borderRadius: 999, border: "none", background: isPix ? "#4ADE80" : "#F5B942", color: "#12141C", fontFamily: "'Inter', sans-serif", fontSize: 13.5, fontWeight: 700, cursor: paying ? "default" : "pointer", opacity: paying ? 0.75 : 1 }}>
+          {paying ? <><Loader2 size={16} className="poppol-spin" /> Processando…</> : <>{isPix ? <QrCode size={16} /> : <CreditCard size={16} />} {isPix ? "Já fiz o pagamento" : `Pagar ${formatBRL(totalCents)}`}</>}
         </button>
       </div>
     </>
@@ -1597,8 +1668,12 @@ function CheckoutView({ p, cart, cartEntries, cartTotalCents, previewDelta, onBa
 const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShare }) {
   const cardImg = cardPortraitDataUri(p.id, p.initials);
   const [cart, setCart] = useState({}); // { itemId: qty }
-  const [stage, setStage] = useState("browse"); // 'browse' | 'checkout'
+  const [stage, setStage] = useState("browse"); // 'browse' | 'checkout' | 'payment' | 'status'
   const [paying, setPaying] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState("form");
+  const [card, setCard] = useState({ number: "", name: "", expiry: "", cvv: "" });
+  const [actionSelection, setActionSelection] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [actionType, setActionType] = useState(null);
   const [selectedActionItem, setSelectedActionItem] = useState(null);
@@ -1645,19 +1720,35 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
       return next;
     });
 
-  const goCheckout = () => {
-    if (cartCount > 0) setStage("checkout");
+  const backToBrowse = () => {
+    setStage("browse");
+    setActionSelection(null);
+    setPaymentMethod(null);
+    setPaymentStatus("form");
   };
-  const backToBrowse = () => setStage("browse");
 
   const handlePay = async () => {
+    if (!actionSelection || !paymentMethod) return;
+    if (paymentMethod === "card" && Object.values(card).some((value) => !value.trim())) {
+      setPaymentStatus("failed");
+      setStage("status");
+      return;
+    }
     setPaying(true);
+    setPaymentStatus("processing");
+    setStage("status");
     try {
-      await onSend(cartEntries);
+      await new Promise((resolve) => setTimeout(resolve, 950));
+      if (paymentMethod === "pix") {
+        setPaymentStatus("awaiting");
+        await new Promise((resolve) => setTimeout(resolve, 1150));
+      }
+      await onSend([{ item: actionSelection.item, qty: actionSelection.quantity }]);
+      setPaymentStatus("confirmed");
       setCart({});
-      setPaying(false);
-      setStage("browse");
     } catch {
+      setPaymentStatus("failed");
+    } finally {
       setPaying(false);
     }
   };
@@ -1682,17 +1773,42 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
           animation: "poppol-sheet-up 220ms ease",
         }}
       >
-        {stage === "checkout" ? (
+        {stage === "checkout" && actionSelection ? (
           <CheckoutView
             p={p}
-            cart={cart}
-            cartEntries={cartEntries}
-            cartTotalCents={cartTotalCents}
-            previewDelta={previewDelta}
-            onBack={backToBrowse}
-            onSetQty={setQty}
+            action={actionSelection}
+            onBack={() => {
+              setStage("intensity");
+              setSelectedActionItem(actionSelection.item);
+            }}
+            onChoosePayment={(method) => {
+              setPaymentMethod(method);
+              setPaymentStatus("form");
+              setStage("payment");
+            }}
+          />
+        ) : (stage === "payment" || stage === "status") && actionSelection && paymentMethod ? (
+          <PaymentView
+            p={p}
+            action={actionSelection}
+            paymentMethod={paymentMethod}
+            onBack={() => {
+              if (paymentStatus === "form") {
+                setStage("checkout");
+              } else {
+                setPaymentStatus("form");
+                setStage("payment");
+              }
+            }}
             onPay={handlePay}
+            onExpire={() => {
+              setPaymentStatus("expired");
+              setStage("status");
+            }}
             paying={paying}
+            paymentStatus={paymentStatus}
+            card={card}
+            setCard={setCard}
           />
         ) : (
           <>
@@ -1921,9 +2037,18 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
               politicianName={p.name}
               cartCount={cartCount}
               cartTotalCents={cartTotalCents}
-              onContinue={goCheckout}
+              onContinue={() => {
+                const firstEntry = cartEntries[0];
+                if (!firstEntry) return;
+                setActionSelection({ item: firstEntry.item, quantity: firstEntry.qty });
+                setStage("checkout");
+              }}
               onChooseAction={(nextAction) => {
                 setActionType(nextAction);
+                setCart({});
+                setActionSelection(null);
+                setPaymentMethod(null);
+                setPaymentStatus("form");
                 setPickerOpen(true);
               }}
             />
@@ -1954,7 +2079,8 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
             if (actionItemSource === "picker") setPickerOpen(true);
           }}
           onConfirm={(quantity) => {
-            setQty(selectedActionItem.id, quantity);
+             setCart({ [selectedActionItem.id]: quantity });
+             setActionSelection({ item: selectedActionItem, quantity });
             setSelectedActionItem(null);
             setStage("checkout");
           }}
@@ -2045,25 +2171,21 @@ export default function PopPolTreemap() {
   const selected = selectedQuery.data ? normalizePolitician(selectedQuery.data) : politicians.find((p) => p.id === selectedId) || null;
 
   // Só é chamado depois que o pagamento simulado (Pix/cartão) é
-  // "aprovado" no checkout — cartEntries é a sacola inteira, com
-  // todos os itens (de apoio e/ou crítica) e quantidades escolhidos.
+  // confirmado no checkout. O checkout atual é uma ação única, então
+  // a manifestação só é criada depois da confirmação do pagamento.
   const handleSend = async (p, cartEntries) => {
-    const response = await fetch("/api/checkout-intents", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        politicianId: p.id,
-        items: cartEntries.map(({ item, qty }) => ({ itemId: item.id, quantity: qty })),
-      }),
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => null);
-      throw new Error(error?.error || "Não foi possível iniciar o checkout.");
+    for (const { item, qty } of cartEntries) {
+      const response = await fetch(`/api/politicians/${encodeURIComponent(p.id)}/manifestations`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ itemId: item.id, quantity: qty }),
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.error || "Não foi possível registrar a ação.");
+      }
     }
-    const checkout = await response.json();
-    if (!checkout.checkoutUrl) throw new Error("O checkout não retornou uma URL válida.");
-    window.location.assign(checkout.checkoutUrl);
   };
 
   const handleShare = (p) => {
