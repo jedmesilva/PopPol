@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, QrCode, Minus, Plus, Loader2, Trash2, TrendingUp, TrendingDown, CheckCircle2, AlertCircle, Clock3, RotateCcw } from "lucide-react";
 import { useGetPolitician, useListPoliticians } from "@workspace/api-client-react";
+import { AnimatePresence, motion } from "framer-motion";
 
 /* ------------------------------------------------------------------
    PopPol — Popularidade Política — Grid dominante (treemap)
@@ -401,7 +402,66 @@ function computeTreemap(politicians, width, height) {
 
 /* --------------------------------- UI --------------------------------- */
 
-function TreemapCell({ rect, gap, onClick }) {
+function ActionEffectsLayer({ effects, targetRects, onDone }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 45, pointerEvents: "none", overflow: "hidden" }} aria-live="polite">
+      <AnimatePresence>
+        {effects.map((effect) => {
+          const item = ITEMS.find((candidate) => candidate.id === effect.itemId) || ITEMS[0];
+          const target = targetRects[effect.politicianId];
+          if (!target) return null;
+          const intensity = Math.max(1, item.value * effect.quantity);
+          const count = Math.min(12, 3 + Math.ceil(intensity / 8));
+          const targetX = target.left + target.width / 2;
+          const targetY = target.top + target.height / 2;
+          const originX = effect.originX ?? (effect.id.charCodeAt(0) % 2 ? -36 : window.innerWidth + 36);
+          const originY = effect.originY ?? (window.innerHeight * (0.22 + (effect.id.charCodeAt(1) % 45) / 100));
+          const color = item.type === "apoio" ? "#4ADE80" : "#E2555F";
+          return (
+            <motion.div
+              key={effect.id}
+              initial={{ left: originX, top: originY, opacity: 0, scale: 0.55, rotate: -14 }}
+              animate={{ left: targetX, top: targetY, opacity: 1, scale: 1 + Math.min(0.7, intensity / 90), rotate: 0 }}
+              exit={{ opacity: 0, scale: 0.2 }}
+              transition={{ duration: Math.min(1.55, 0.72 + intensity / 85), ease: [0.16, 1, 0.3, 1] }}
+              onAnimationComplete={() => onDone(effect.id)}
+              style={{
+                position: "fixed",
+                width: Math.min(116, 58 + intensity * 1.4),
+                height: Math.min(116, 58 + intensity * 1.4),
+                marginLeft: -Math.min(58, 29 + intensity * 0.7),
+                marginTop: -Math.min(58, 29 + intensity * 0.7),
+                display: "grid",
+                placeItems: "center",
+                fontSize: Math.min(62, 32 + intensity * 0.7),
+                filter: `drop-shadow(0 0 ${Math.min(24, 8 + intensity / 3)}px ${color})`,
+              }}
+            >
+              <span className="poppol-action-trail" style={{ background: `linear-gradient(90deg, transparent, ${color}88, transparent)` }} />
+              <span className="poppol-action-orb" style={{ borderColor: `${color}99`, boxShadow: `0 0 28px ${color}88, inset 0 0 16px ${color}44` }}>
+                {item.emoji}
+              </span>
+              <span className="poppol-action-particles">
+                {Array.from({ length: count }, (_, index) => (
+                  <i
+                    key={index}
+                    style={{
+                      background: color,
+                      transform: `rotate(${index * (360 / count)}deg) translateY(-${24 + (index % 3) * 10}px)`,
+                      animationDelay: `${(index % 4) * 55}ms`,
+                    }}
+                  />
+                ))}
+              </span>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function TreemapCell({ rect, gap, onClick, cellRef, impacting }) {
   const p = rect.item;
   const w = rect.w - gap;
   const h = rect.h - gap;
@@ -414,6 +474,9 @@ function TreemapCell({ rect, gap, onClick }) {
 
   return (
     <button
+      ref={cellRef}
+      data-politician-id={p.id}
+      className={impacting ? "poppol-cell-impact" : undefined}
       onClick={onClick}
       title={`${p.name} — ${p.role} — saldo ${formatScore(p.netScore)}`}
       style={{
@@ -2104,7 +2167,10 @@ export default function PopPolTreemap() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [effects, setEffects] = useState([]);
   const toastTimer = useRef(null);
+  const cellNodes = useRef(new Map());
+  const seenEventIds = useRef(new Set());
   const queryParams = useMemo(
     () => ({
       q: query.trim() || undefined,
@@ -2162,6 +2228,50 @@ export default function PopPolTreemap() {
   }, [politiciansWithTotals]);
 
   const rects = useMemo(() => computeTreemap(filtered, size.w, size.h), [filtered, size]);
+  const activeImpactIds = useMemo(() => new Set(effects.map((effect) => effect.politicianId)), [effects]);
+  const [targetRects, setTargetRects] = useState({});
+
+  const measureCells = useCallback(() => {
+    const next = {};
+    for (const [id, node] of cellNodes.current) {
+      if (!node) continue;
+      const rect = node.getBoundingClientRect();
+      next[id] = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    }
+    setTargetRects(next);
+  }, []);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(measureCells);
+    return () => cancelAnimationFrame(frame);
+  }, [rects, size, measureCells]);
+
+  const enqueueAction = useCallback((event) => {
+    if (!event?.id || !event.politicianId || !event.itemId || seenEventIds.current.has(event.id)) return;
+    seenEventIds.current.add(event.id);
+    const effect = {
+      ...event,
+      quantity: Math.min(99, Math.max(1, Number(event.quantity) || 1)),
+      originX: typeof window !== "undefined" ? window.innerWidth / 2 : 500,
+      originY: typeof window !== "undefined" ? window.innerHeight + 70 : 870,
+    };
+    setEffects((current) => [...current.slice(-11), effect]);
+    window.setTimeout(() => {
+      setEffects((current) => current.filter((candidate) => candidate.id !== event.id));
+    }, 1900);
+  }, []);
+
+  useEffect(() => {
+    const source = new EventSource("/api/events");
+    source.onmessage = (message) => {
+      try {
+        enqueueAction(JSON.parse(message.data));
+      } catch {
+        // Ignore malformed events without interrupting the live stream.
+      }
+    };
+    return () => source.close();
+  }, [enqueueAction]);
 
   const activeFilterCount = [country, state, city, level, query.trim()].filter(Boolean).length;
 
@@ -2190,6 +2300,14 @@ export default function PopPolTreemap() {
         const error = await response.json().catch(() => null);
         throw new Error(error?.error || "Não foi possível registrar a ação.");
       }
+      const created = await response.json();
+      enqueueAction({
+        id: created.id,
+        politicianId: created.politicianId,
+        itemId: item.id,
+        quantity: created.quantity,
+        createdAt: created.createdAt,
+      });
     }
   };
 
@@ -2285,6 +2403,51 @@ export default function PopPolTreemap() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes poppol-cell-impact {
+          0%, 100% { transform: translate(0, 0) scale(1); filter: brightness(1); }
+          18% { transform: translate(-3px, 2px) scale(1.012); filter: brightness(1.3); }
+          36% { transform: translate(4px, -2px) scale(1.024); filter: brightness(1.12); }
+          54% { transform: translate(-2px, 1px) scale(1.012); }
+        }
+        .poppol-cell-impact { animation: poppol-cell-impact 620ms cubic-bezier(.36,.07,.19,.97); z-index: 4; }
+        .poppol-action-orb {
+          position: relative;
+          z-index: 2;
+          width: 1em;
+          height: 1em;
+          display: grid;
+          place-items: center;
+          border: 2px solid;
+          border-radius: 50%;
+          background: rgba(12,13,18,0.7);
+          backdrop-filter: blur(5px);
+        }
+        .poppol-action-trail {
+          position: absolute;
+          width: 190%;
+          height: 3px;
+          transform: rotate(-18deg);
+          opacity: 0.7;
+          filter: blur(2px);
+        }
+        .poppol-action-particles { position: absolute; inset: 0; }
+        .poppol-action-particles i {
+          position: absolute;
+          left: calc(50% - 3px);
+          top: calc(50% - 3px);
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          animation: poppol-action-particle 720ms ease-out both;
+        }
+        @keyframes poppol-action-particle {
+          from { opacity: 0; transform: rotate(0deg) translateY(0) scale(0.4); }
+          25% { opacity: 1; }
+          to { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .poppol-cell-impact, .poppol-action-particles i { animation: none; }
+        }
       `}</style>
 
       <div style={{ position: "absolute", inset: 0 }}>
@@ -2329,11 +2492,17 @@ export default function PopPolTreemap() {
               key={rect.item.id}
               rect={rect}
               gap={4}
+              cellRef={(node) => {
+                if (node) cellNodes.current.set(rect.item.id, node);
+                else cellNodes.current.delete(rect.item.id);
+              }}
+              impacting={activeImpactIds.has(rect.item.id)}
               onClick={() => setSelectedId(rect.item.id)}
             />
           ))
         )}
       </div>
+      <ActionEffectsLayer effects={effects} targetRects={targetRects} onDone={() => undefined} />
 
       <div
         style={{

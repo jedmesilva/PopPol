@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, poppolCheckoutIntentsTable, poppolManifestationsTable } from "@workspace/db";
 import { getStripeSync } from "./stripeClient";
+import { publishPoppolAction } from "./lib/action-events";
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
@@ -16,6 +17,7 @@ export class WebhookHandlers {
     const intentId = event.data?.object?.metadata?.checkoutIntentId;
     if (!intentId) return;
 
+    const events: Array<{ id: string; politicianId: string; itemId: string; quantity: number }> = [];
     await db.transaction(async (tx) => {
       const [intent] = await tx
         .select()
@@ -29,8 +31,7 @@ export class WebhookHandlers {
         .set({ status: "paid", providerSessionId: event.data?.object?.id ?? null, paidAt: new Date() })
         .where(eq(poppolCheckoutIntentsTable.id, intent.id));
 
-      await tx.insert(poppolManifestationsTable).values(
-        intent.lineItems.map((lineItem, index) => ({
+      const manifestationRows = intent.lineItems.map((lineItem, index) => ({
           id: `manifestation-${intent.id}-${index}`,
           politicianId: intent.politicianId,
           itemId: lineItem.itemId,
@@ -43,8 +44,12 @@ export class WebhookHandlers {
           city: intent.city,
           referrer: intent.referrer,
           campaign: intent.campaign,
-        })),
-      ).onConflictDoNothing();
+        }));
+      await tx.insert(poppolManifestationsTable).values(manifestationRows).onConflictDoNothing();
+      events.push(...manifestationRows.map(({ id, politicianId, itemId, quantity }) => ({ id, politicianId, itemId, quantity })));
     });
+    for (const event of events) {
+      publishPoppolAction({ ...event, createdAt: new Date().toISOString() });
+    }
   }
 }

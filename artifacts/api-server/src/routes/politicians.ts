@@ -7,6 +7,7 @@ import {
 } from "@workspace/api-zod";
 import { ensurePoppolSeeded } from "../lib/poppol-data";
 import { getRequestContext } from "../lib/request-context";
+import { publishPoppolAction } from "../lib/action-events";
 
 type Item = typeof poppolItemsTable.$inferSelect;
 type Manifestation = typeof poppolManifestationsTable.$inferSelect;
@@ -102,6 +103,13 @@ router.post("/politicians/:id/manifestations", async (req, res): Promise<void> =
     note: body.data.note ?? null,
     ...getRequestContext(req, res),
   }).returning();
+  publishPoppolAction({
+    id: created.id,
+    politicianId: created.politicianId,
+    itemId: created.itemId,
+    quantity: created.quantity,
+    createdAt: created.createdAt.toISOString(),
+  });
   res.status(201).json(CreateManifestationResponse.parse({ id: created.id, politicianId: created.politicianId, item: serializeItem(item), quantity: created.quantity, createdAt: created.createdAt, note: created.note }));
 });
 
