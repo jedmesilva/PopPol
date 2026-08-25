@@ -1,0 +1,1 @@
+- [Stripe opcional no desenvolvimento](stripe-optional-development.md) — a API deve subir mesmo sem conexão Stripe; checkout e sincronização ficam indisponíveis até conectar.

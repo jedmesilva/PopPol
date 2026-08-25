@@ -18,13 +18,17 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function initStripe(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL environment variable is required.");
-  await runMigrations({ databaseUrl, schema: "stripe" });
-  const stripeSync = await getStripeSync();
-  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (domain) await stripeSync.findOrCreateManagedWebhook(`https://${domain}/api/stripe/webhook`);
-  await stripeSync.syncBackfill();
+  try {
+    const databaseUrl = process.env.DATABASE_URL;
+    if (!databaseUrl) throw new Error("DATABASE_URL environment variable is required.");
+    await runMigrations({ databaseUrl, schema: "stripe" });
+    const stripeSync = await getStripeSync();
+    const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
+    if (domain) await stripeSync.findOrCreateManagedWebhook(`https://${domain}/api/stripe/webhook`);
+    await stripeSync.syncBackfill();
+  } catch (err) {
+    logger.warn({ err }, "Stripe integration unavailable; continuing without Stripe features.");
+  }
 }
 
 await initStripe();
