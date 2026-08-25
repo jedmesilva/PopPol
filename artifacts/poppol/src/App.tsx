@@ -1189,9 +1189,12 @@ const ACTION_LEVELS = [
   { label: "Leve", quantity: 1, description: "Um sinal discreto" },
   { label: "Moderado", quantity: 4, description: "Uma pressão perceptível" },
   { label: "Forte", quantity: 12, description: "Uma reação contundente" },
-  { label: "Máximo", quantity: 30, description: "Impacto de grande escala" },
   { label: "Apocalíptico", quantity: 60, description: "Impacto extremo — use com consciência" },
 ];
+
+function actionLevelLabel(quantity) {
+  return ACTION_LEVELS.find((level) => level.quantity === quantity)?.label || "Personalizada";
+}
 
 function ActionIntensitySheet({ item, initialQty, onClose, onConfirm }) {
   const meta = TYPE_META[item.type];
@@ -1452,6 +1455,7 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onSetQty, onSelect, 
 // Etapa de revisão: um checkout representa exatamente uma ação escolhida.
 function CheckoutView({ p, action, onBack, onChoosePayment }) {
   const { item, quantity } = action;
+  const levelLabel = action.levelLabel || actionLevelLabel(quantity);
   const meta = TYPE_META[item.type];
   const totalCents = item.priceCents * quantity;
   const impact = meta.sign * item.value * quantity;
@@ -1493,7 +1497,7 @@ function CheckoutView({ p, action, onBack, onChoosePayment }) {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-              {meta.sign > 0 ? "Defender" : "Atacar"} · {quantity}× força
+              {meta.sign > 0 ? "Defender" : "Atacar"} · {levelLabel} · {quantity}× força
             </div>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 700, color: "#EDEBE4" }}>{item.label}</div>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#A8ADBA", marginTop: 3 }}>Ação para {p.name}</div>
@@ -1549,6 +1553,7 @@ function CheckoutView({ p, action, onBack, onChoosePayment }) {
 
 function PaymentView({ p, action, paymentMethod, onBack, onPay, onExpire, paying, paymentStatus, card, setCard }) {
   const { item, quantity } = action;
+  const levelLabel = action.levelLabel || actionLevelLabel(quantity);
   const meta = TYPE_META[item.type];
   const totalCents = item.priceCents * quantity;
   const isPix = paymentMethod === "pix";
@@ -1578,7 +1583,7 @@ function PaymentView({ p, action, paymentMethod, onBack, onPay, onExpire, paying
             </button>
             <div>
               <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 17, fontWeight: 600, color: "#EDEBE4" }}>Status do pagamento</div>
-              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>{item.label} · {formatBRL(totalCents)}</div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11.5, color: "#6B7180" }}>{item.label} · {levelLabel} · {formatBRL(totalCents)}</div>
             </div>
           </div>
           <div style={{ borderRadius: 20, padding: "28px 22px", textAlign: "center", background: positive ? "#4ADE8015" : waiting ? "#F5B94215" : "#E2555F15", border: `1px solid ${positive ? "#4ADE8055" : waiting ? "#F5B94255" : "#E2555F55"}` }}>
@@ -1590,7 +1595,7 @@ function PaymentView({ p, action, paymentMethod, onBack, onPay, onExpire, paying
             <span style={{ fontSize: 25 }}>{item.emoji}</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4" }}>{meta.sign > 0 ? "Defender" : "Atacar"} {p.name}</div>
-              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>{quantity}× {item.label}</div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>{levelLabel} · {quantity}× {item.label}</div>
             </div>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, fontWeight: 700, color: "#EDEBE4" }}>{formatBRL(totalCents)}</span>
           </div>
@@ -1623,7 +1628,7 @@ function PaymentView({ p, action, paymentMethod, onBack, onPay, onExpire, paying
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", borderRadius: 14, background: meta.soft, border: `1px solid ${meta.color}44`, marginBottom: 18 }}>
           <span style={{ fontSize: 24 }}>{item.emoji}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4" }}>{item.label} · {quantity}× força</div>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, fontWeight: 700, color: "#EDEBE4" }}>{item.label} · {levelLabel} · {quantity}× força</div>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#9096A6" }}>{isPix ? "Pix" : "Cartão"} · {formatBRL(totalCents)}</div>
           </div>
         </div>
@@ -2040,7 +2045,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
               onContinue={() => {
                 const firstEntry = cartEntries[0];
                 if (!firstEntry) return;
-                setActionSelection({ item: firstEntry.item, quantity: firstEntry.qty });
+                setActionSelection({ item: firstEntry.item, quantity: firstEntry.qty, levelLabel: actionLevelLabel(firstEntry.qty) });
                 setStage("checkout");
               }}
               onChooseAction={(nextAction) => {
@@ -2080,7 +2085,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
           }}
           onConfirm={(quantity) => {
              setCart({ [selectedActionItem.id]: quantity });
-             setActionSelection({ item: selectedActionItem, quantity });
+             setActionSelection({ item: selectedActionItem, quantity, levelLabel: actionLevelLabel(quantity) });
             setSelectedActionItem(null);
             setStage("checkout");
           }}
