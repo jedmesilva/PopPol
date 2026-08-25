@@ -1100,15 +1100,11 @@ function TrayChip({ item, inCart, flashing, suggested, onTap, onHold }) {
 // Cartão de item do catálogo completo — versão maior do TrayChip, em
 // grade, com o ícone em destaque e o nome sempre visível.
 function GridItemCard({ item, inCart, flashing, onTap, onHold }) {
-  const { startPress, movePress, endPress, clearPress } = useTapOrHold({ onTap, onHold });
   const meta = TYPE_META[item.type];
   return (
     <button
-      onPointerDown={startPress}
-      onPointerMove={movePress}
-      onPointerUp={endPress}
-      onPointerLeave={clearPress}
-      onPointerCancel={clearPress}
+      type="button"
+      onClick={onTap}
       style={{
         position: "relative",
         display: "flex",
