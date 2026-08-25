@@ -21,6 +21,8 @@ import type {
 
 import type {
   ActivityItem,
+  CheckoutIntent,
+  CheckoutIntentInput,
   HealthStatus,
   ListPoliticiansParams,
   Manifestation,
@@ -366,6 +368,77 @@ export const useCreateManifestation = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateManifestationMutationOptions(options));
+    }
+
+export const getCreateCheckoutIntentUrl = () => {
+
+
+
+
+  return `/api/checkout-intents`
+}
+
+/**
+ * @summary Create an anonymous server-owned checkout intent
+ */
+export const createCheckoutIntent = async (checkoutIntentInput: CheckoutIntentInput, options?: Parameters<typeof customFetch>[1]): Promise<CheckoutIntent> => {
+
+  return customFetch<CheckoutIntent>(getCreateCheckoutIntentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(checkoutIntentInput)
+  }
+);}
+
+
+
+
+
+export const getCreateCheckoutIntentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutIntent>>, TError,{data: BodyType<CheckoutIntentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createCheckoutIntent>>, TError,{data: BodyType<CheckoutIntentInput>}, TContext> => {
+
+const mutationKey = ['createCheckoutIntent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createCheckoutIntent>>, {data: BodyType<CheckoutIntentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createCheckoutIntent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateCheckoutIntentMutationResult = NonNullable<Awaited<ReturnType<typeof createCheckoutIntent>>>
+    export type CreateCheckoutIntentMutationBody = BodyType<CheckoutIntentInput>
+    export type CreateCheckoutIntentMutationError = ErrorType<void>
+
+    /**
+ * @summary Create an anonymous server-owned checkout intent
+ */
+export const useCreateCheckoutIntent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCheckoutIntent>>, TError,{data: BodyType<CheckoutIntentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createCheckoutIntent>>,
+        TError,
+        {data: BodyType<CheckoutIntentInput>},
+        TContext
+      > => {
+      return useMutation(getCreateCheckoutIntentMutationOptions(options));
     }
 
 export const getListActivityUrl = () => {

@@ -97,6 +97,43 @@ export interface ManifestationInput {
   note?: string | null;
 }
 
+export interface CheckoutLineItem {
+  itemId: string;
+  /**
+     * @minimum 1
+     * @maximum 99
+     */
+  quantity: number;
+}
+
+export interface CheckoutIntentInput {
+  politicianId: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  items: CheckoutLineItem[];
+}
+
+export type CheckoutIntentStatus = typeof CheckoutIntentStatus[keyof typeof CheckoutIntentStatus];
+
+
+export const CheckoutIntentStatus = {
+  pending: 'pending',
+  paid: 'paid',
+  expired: 'expired',
+  canceled: 'canceled',
+} as const;
+
+export interface CheckoutIntent {
+  id: string;
+  checkoutToken: string;
+  politicianId: string;
+  amountCents: number;
+  status: CheckoutIntentStatus;
+  expiresAt: string;
+}
+
 export interface Manifestation {
   id: string;
   politicianId: string;

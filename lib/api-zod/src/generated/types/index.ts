@@ -8,6 +8,10 @@
 
 export * from './activityItem';
 export * from './activityItemKind';
+export * from './checkoutIntent';
+export * from './checkoutIntentInput';
+export * from './checkoutIntentStatus';
+export * from './checkoutLineItem';
 export * from './healthStatus';
 export * from './listPoliticiansLevel';
 export * from './listPoliticiansParams';

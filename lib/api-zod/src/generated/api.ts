@@ -152,6 +152,33 @@ export const CreateManifestationResponse = zod.object({
 
 
 /**
+ * @summary Create an anonymous server-owned checkout intent
+ */
+export const createCheckoutIntentBodyItemsItemQuantityMax = 99;
+
+export const createCheckoutIntentBodyItemsMax = 20;
+
+
+
+export const CreateCheckoutIntentBody = zod.object({
+  "politicianId": zod.string(),
+  "items": zod.array(zod.object({
+  "itemId": zod.string(),
+  "quantity": zod.number().min(1).max(createCheckoutIntentBodyItemsItemQuantityMax)
+})).min(1).max(createCheckoutIntentBodyItemsMax)
+})
+
+export const CreateCheckoutIntentResponse = zod.object({
+  "id": zod.string(),
+  "checkoutToken": zod.string(),
+  "politicianId": zod.string(),
+  "amountCents": zod.number(),
+  "status": zod.enum(['pending', 'paid', 'expired', 'canceled']),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List recent public activity
  */
 export const ListActivityResponseItem = zod.object({

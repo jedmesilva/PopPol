@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { rateLimit } from "./middlewares/rate-limit";
 
 const app: Express = express();
 
@@ -25,7 +26,9 @@ app.use(
     },
   }),
 );
-app.use(cors());
+const allowedOrigin = process.env.CORS_ORIGIN;
+app.use(cors(allowedOrigin ? { origin: allowedOrigin } : { origin: false }));
+app.use(rateLimit);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

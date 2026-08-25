@@ -6,6 +6,7 @@ import {
   GetPoliticianResponse, ListActivityResponse, ListPoliticiansQueryParams, ListPoliticiansResponse,
 } from "@workspace/api-zod";
 import { ensurePoppolSeeded } from "../lib/poppol-data";
+import { getRequestContext } from "../lib/request-context";
 
 type Item = typeof poppolItemsTable.$inferSelect;
 type Manifestation = typeof poppolManifestationsTable.$inferSelect;
@@ -94,7 +95,12 @@ router.post("/politicians/:id/manifestations", async (req, res): Promise<void> =
   if (!politician || !item) { res.status(404).json({ error: "Político ou item não encontrado" }); return; }
   const quantity = body.data.quantity ?? 1;
   const [created] = await db.insert(poppolManifestationsTable).values({
-    id: `manifestation-${crypto.randomUUID()}`, politicianId: politician.id, itemId: item.id, quantity, note: body.data.note ?? null,
+    id: `manifestation-${crypto.randomUUID()}`,
+    politicianId: politician.id,
+    itemId: item.id,
+    quantity,
+    note: body.data.note ?? null,
+    ...getRequestContext(req, res),
   }).returning();
   res.status(201).json(CreateManifestationResponse.parse({ id: created.id, politicianId: created.politicianId, item: serializeItem(item), quantity: created.quantity, createdAt: created.createdAt, note: created.note }));
 });
