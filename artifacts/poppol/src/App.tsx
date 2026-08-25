@@ -68,10 +68,6 @@ const APOIO_ITEMS = ITEMS.filter((it) => it.type === "apoio");
 const REJEICAO_ITEMS = ITEMS.filter((it) => it.type === "rejeicao");
 // Lista única, com itens dos dois lados intercalados por tier — é o
 // que aparece na interface pro usuário, sem separar por rótulo.
-const MIXED_ITEMS = [0, 1, 2, 3].flatMap((tier) => [
-  APOIO_ITEMS.find((it) => it.tier === tier),
-  REJEICAO_ITEMS.find((it) => it.tier === tier),
-]);
 // Categorias neutras (por raridade/tier) usadas no catálogo completo —
 // cada categoria mistura itens dos dois lados, sem nomear "apoio" ou
 // "crítica" em lugar nenhum da interface.
@@ -923,49 +919,14 @@ function QtyAdjustBar({ item, initialQty, canRemove, onCancel, onConfirm, onRemo
   );
 }
 
-// Bandeja de seleção: toque adiciona 1 unidade à sacola. Pressionar e
-// segurar abre um painel pra ajustar a quantidade exata daquele item
-// (ou removê-lo), sem sair da bandeja. As abas "Apoiar"/"Criticar"
-// trocam qual lado do catálogo aparece na tira; "Ver todos" abre o
-// catálogo completo, com os dois lados juntos. Nada é enviado ainda —
-// só ao pagar no checkout é que os itens seguem pro político.
-function CartTray({ politicianName, cart, onAddOne, onSetQty, cartCount, cartTotalCents, onContinue, onOpenAll }) {
-  const [qtyItem, setQtyItem] = useState(null); // item em modo "ajustar quantidade"
-  const [flashId, setFlashId] = useState(null);
-  const flashTimer = useRef(null);
-
-  const flash = (itemId) => {
-    setFlashId(itemId);
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => setFlashId(null), 500);
-  };
-
-  useEffect(() => () => flashTimer.current && clearTimeout(flashTimer.current), []);
-
-  if (qtyItem) {
-    return (
-      <QtyAdjustBar
-        item={qtyItem}
-        initialQty={cart[qtyItem.id] || 1}
-        canRemove={(cart[qtyItem.id] || 0) > 0}
-        onCancel={() => setQtyItem(null)}
-        onConfirm={(qty) => {
-          onSetQty(qtyItem.id, qty);
-          setQtyItem(null);
-        }}
-        onRemove={() => {
-          onSetQty(qtyItem.id, 0);
-          setQtyItem(null);
-        }}
-      />
-    );
-  }
-
+// Footer de ação: primeiro o usuário escolhe uma intenção (defender ou
+// atacar), depois a tela de itens mostra apenas o catálogo daquele lado.
+function CartTray({ politicianName, cartCount, cartTotalCents, onContinue, onChooseAction }) {
   return (
     <div style={{ borderTop: "1px solid #2A2E3A", background: "#14161D", flexShrink: 0 }}>
       <div style={{ padding: "10px 18px 0" }}>
         <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 600, color: "#F5B942", marginBottom: 2 }}>
-          {politicianName ? `Ataque ou defenda ${politicianName}` : "Ataque ou defenda"}
+          {politicianName ? `O que você quer fazer com ${politicianName}?` : "Escolha uma ação"}
         </div>
         <span
           style={{
@@ -977,46 +938,51 @@ function CartTray({ politicianName, cart, onAddOne, onSetQty, cartCount, cartTot
             letterSpacing: "0.05em",
           }}
         >
-          Toque pra adicionar · segure pra ajustar qtd.
+          Escolha um lado para ver os itens disponíveis
         </span>
       </div>
-      <div style={{ display: "flex", gap: 8, overflowX: "auto", padding: "14px 18px 14px", WebkitOverflowScrolling: "touch" }}>
-        {MIXED_ITEMS.map((item, i) => (
-          <TrayChip
-            key={item.id}
-            item={item}
-            inCart={cart[item.id] || 0}
-            flashing={flashId === item.id}
-            suggested={i === 0 && cartCount === 0}
-            onTap={() => {
-              flash(item.id);
-              onAddOne(item.id);
-            }}
-            onHold={() => setQtyItem(item)}
-          />
-        ))}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 18px 16px" }}>
         <button
-          onClick={onOpenAll}
+          onClick={() => onChooseAction("apoio")}
           style={{
             display: "flex",
-            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: 4,
-            minWidth: 84,
-            padding: "12px 8px 9px",
-            borderRadius: 16,
-            border: "1px dashed #3A3F4E",
-            background: "#1B1E27",
-            color: "#9096A6",
+            gap: 8,
+            padding: "14px 10px",
+            borderRadius: 14,
+            border: "1px solid #4ADE8055",
+            background: "#4ADE8018",
+            color: "#7BE89A",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 13.5,
+            fontWeight: 700,
             cursor: "pointer",
-            flexShrink: 0,
           }}
         >
-          <LayoutGrid size={20} />
-          <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
-            Ver todos
-          </span>
+          <TrendingUp size={17} />
+          Defender
+        </button>
+        <button
+          onClick={() => onChooseAction("rejeicao")}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "14px 10px",
+            borderRadius: 14,
+            border: "1px solid #E2555F55",
+            background: "#E2555F18",
+            color: "#F47B83",
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 13.5,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          <TrendingDown size={17} />
+          Atacar
         </button>
       </div>
 
@@ -1042,7 +1008,7 @@ function CartTray({ politicianName, cart, onAddOne, onSetQty, cartCount, cartTot
             }}
           >
             <ShoppingBag size={15} />
-            {`Continuar · ${cartCount} ${cartCount === 1 ? "item" : "itens"} · ${formatBRL(cartTotalCents)}`}
+            {`Continuar com ${cartCount} ${cartCount === 1 ? "item" : "itens"} · ${formatBRL(cartTotalCents)}`}
           </button>
         </div>
       )}
@@ -1213,7 +1179,7 @@ function GridItemCard({ item, inCart, flashing, onTap, onHold }) {
 // Catálogo completo em tela cheia — pensado pra listas de itens muito
 // maiores do que cabem na tira. Agrupa por lado (apoio / crítica) e
 // tem busca no topo; abre por cima do modal de detalhe.
-function ItemPickerSheet({ items = ITEMS, cart, onAddOne, onSetQty, onClose }) {
+function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, onClose }) {
   const [query, setQuery] = useState("");
   const [qtyItem, setQtyItem] = useState(null);
   const [flashId, setFlashId] = useState(null);
@@ -1229,7 +1195,9 @@ function ItemPickerSheet({ items = ITEMS, cart, onAddOne, onSetQty, onClose }) {
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const matches = (item) => !q || item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q);
+    const matches = (item) =>
+      item.type === actionType &&
+      (!q || item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q));
     return CATEGORY_LABELS.map((label, tier) => ({
       label,
       items: items.filter((it) => it.tier === tier && matches(it)),
@@ -1259,7 +1227,7 @@ function ItemPickerSheet({ items = ITEMS, cart, onAddOne, onSetQty, onClose }) {
         <div style={{ padding: "18px 20px 12px", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 18, fontWeight: 600, color: "#EDEBE4" }}>
-              Todos os itens
+              {actionType === "apoio" ? "Itens para defender" : "Itens para atacar"}
             </div>
             <button
               onClick={onClose}
@@ -1294,7 +1262,7 @@ function ItemPickerSheet({ items = ITEMS, cart, onAddOne, onSetQty, onClose }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar item..."
+              placeholder={actionType === "apoio" ? "Buscar item de defesa..." : "Buscar item de ataque..."}
               style={{
                 flex: 1,
                 background: "none",
@@ -1544,6 +1512,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
   const [stage, setStage] = useState("browse"); // 'browse' | 'checkout'
   const [paying, setPaying] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [actionType, setActionType] = useState(null);
   const payTimer = useRef(null);
 
   useEffect(() => () => payTimer.current && clearTimeout(payTimer.current), []);
@@ -1844,13 +1813,13 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
 
             <CartTray
               politicianName={p.name}
-              cart={cart}
-              onAddOne={addOne}
-              onSetQty={setQty}
               cartCount={cartCount}
               cartTotalCents={cartTotalCents}
               onContinue={goCheckout}
-              onOpenAll={() => setPickerOpen(true)}
+              onChooseAction={(nextAction) => {
+                setActionType(nextAction);
+                setPickerOpen(true);
+              }}
             />
           </>
         )}
@@ -1859,6 +1828,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
       {pickerOpen && (
         <ItemPickerSheet
           items={availableItems}
+          actionType={actionType}
           cart={cart}
           onAddOne={addOne}
           onSetQty={setQty}
