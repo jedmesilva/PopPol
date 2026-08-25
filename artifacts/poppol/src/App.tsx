@@ -1174,7 +1174,124 @@ function GridItemCard({ item, inCart, flashing, onTap, onHold }) {
 
 // Catálogo de uma ação em tela cheia. Mostra todos os itens do lado
 // escolhido em uma única grade, com busca no topo.
-function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, onClose }) {
+const ACTION_LEVELS = [
+  { label: "Leve", quantity: 1, description: "Um sinal discreto" },
+  { label: "Moderado", quantity: 4, description: "Uma pressão perceptível" },
+  { label: "Forte", quantity: 12, description: "Uma reação contundente" },
+  { label: "Máximo", quantity: 30, description: "Impacto de grande escala" },
+  { label: "Apocalíptico", quantity: 60, description: "Impacto extremo — use com consciência" },
+];
+
+function ActionIntensitySheet({ item, initialQty, onClose, onConfirm }) {
+  const meta = TYPE_META[item.type];
+  const [levelIndex, setLevelIndex] = useState(
+    Math.max(0, ACTION_LEVELS.findIndex((level) => level.quantity === initialQty)),
+  );
+  const level = ACTION_LEVELS[levelIndex];
+  const quantity = level.quantity;
+  const impact = meta.sign * item.value * quantity;
+  const totalCents = item.priceCents * quantity;
+  const isApocalyptic = levelIndex === ACTION_LEVELS.length - 1;
+
+  return (
+    <div className="poppol-modal-overlay" style={{ position: "fixed", inset: 0, zIndex: 85, display: "flex", alignItems: "flex-end" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(8,9,13,0.86)" }} />
+      <div
+        className="poppol-modal"
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: 480,
+          margin: "0 auto",
+          background: "#181B24",
+          borderTop: `1px solid ${isApocalyptic ? "#E2555F" : meta.color}88`,
+          borderRadius: "24px 24px 0 0",
+          padding: "20px 20px 22px",
+          animation: "poppol-sheet-up 220ms ease",
+          boxShadow: isApocalyptic ? "0 -12px 60px rgba(226,85,95,0.22)" : "0 -12px 50px rgba(0,0,0,0.35)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
+            <div style={{ width: 62, height: 62, borderRadius: 18, background: meta.soft, border: `1px solid ${meta.color}55`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 38 }}>
+              {item.emoji}
+            </div>
+            <div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                {meta.sign > 0 ? "Ação de defesa" : "Ação de ataque"}
+              </div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 21, fontWeight: 700, color: "#EDEBE4" }}>{item.label}</div>
+              <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#9096A6", marginTop: 3 }}>{item.hint}</div>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid #2A2E3A", background: "#1B1E27", color: "#9096A6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ marginTop: 22, background: meta.soft, border: `1px solid ${meta.color}44`, borderRadius: 16, padding: "13px 14px" }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 12.5, color: "#C7CCD6", lineHeight: 1.45 }}>
+            {item.hint ? `${item.label} gera ${meta.sign > 0 ? "apoio" : "reprovação"} proporcional à intensidade escolhida.` : "Escolha a força da sua ação."}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, fontWeight: 700, color: meta.color }}>{level.label}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: "#EDEBE4" }}>{level.description}</span>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 11, fontWeight: 700, color: "#9096A6", textTransform: "uppercase", letterSpacing: "0.05em" }}>Intensidade da ação</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 600, color: "#EDEBE4" }}>{quantity}×</span>
+          </div>
+          <input
+            aria-label="Intensidade da ação"
+            type="range"
+            min="0"
+            max={ACTION_LEVELS.length - 1}
+            step="1"
+            value={levelIndex}
+            onChange={(e) => setLevelIndex(Number(e.target.value))}
+            style={{ width: "100%", accentColor: isApocalyptic ? "#E2555F" : meta.color, cursor: "pointer" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+            {ACTION_LEVELS.map((entry, index) => (
+              <button key={entry.label} onClick={() => setLevelIndex(index)} style={{ border: "none", background: "none", padding: 0, color: index === levelIndex ? (isApocalyptic ? "#F47B83" : meta.color) : "#6B7180", fontFamily: "'Inter', sans-serif", fontSize: 9.5, fontWeight: index === levelIndex ? 700 : 500, cursor: "pointer" }}>
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isApocalyptic && (
+          <div style={{ marginTop: 16, borderRadius: 12, padding: "10px 12px", background: "#E2555F18", border: "1px solid #E2555F66", color: "#F47B83", fontFamily: "'Inter', sans-serif", fontSize: 11.5, fontWeight: 600, lineHeight: 1.4 }}>
+            ⚠ Esta ação terá um impacto extremo. Confira os valores antes de confirmar.
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 18 }}>
+          <div style={{ background: "#1F2330", border: "1px solid #2A2E3A", borderRadius: 14, padding: "12px 13px" }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6", marginBottom: 5 }}>Impacto na popularidade</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 600, color: meta.color }}>{formatScore(impact)}</div>
+          </div>
+          <div style={{ background: "#1F2330", border: "1px solid #2A2E3A", borderRadius: 14, padding: "12px 13px" }}>
+            <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10.5, color: "#9096A6", marginBottom: 5 }}>Valor da ação</div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, fontWeight: 600, color: "#EDEBE4" }}>{formatBRL(totalCents)}</div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => onConfirm(quantity)}
+          style={{ width: "100%", marginTop: 14, padding: "14px", borderRadius: 999, border: "none", background: isApocalyptic ? "#E2555F" : "#F5B942", color: "#12141C", fontFamily: "'Inter', sans-serif", fontSize: 13.5, fontWeight: 700, cursor: "pointer" }}
+        >
+          {`Confirmar ${meta.sign > 0 ? "defesa" : "ataque"} ${level.label.toLowerCase()} · ${formatBRL(totalCents)}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ItemPickerSheet({ items = ITEMS, actionType, cart, onSetQty, onSelect, onClose }) {
   const [query, setQuery] = useState("");
   const [qtyItem, setQtyItem] = useState(null);
   const [flashId, setFlashId] = useState(null);
@@ -1291,7 +1408,7 @@ function ItemPickerSheet({ items = ITEMS, actionType, cart, onAddOne, onSetQty, 
                   flashing={flashId === item.id}
                   onTap={() => {
                     flash(item.id);
-                    onAddOne(item.id);
+                    onSelect(item);
                   }}
                   onHold={() => setQtyItem(item)}
                 />
@@ -1488,6 +1605,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
   const [paying, setPaying] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [actionType, setActionType] = useState(null);
+  const [selectedActionItem, setSelectedActionItem] = useState(null);
   const payTimer = useRef(null);
 
   useEffect(() => () => payTimer.current && clearTimeout(payTimer.current), []);
@@ -1805,9 +1923,24 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
           items={availableItems}
           actionType={actionType}
           cart={cart}
-          onAddOne={addOne}
           onSetQty={setQty}
+          onSelect={(item) => {
+            setSelectedActionItem(item);
+            setPickerOpen(false);
+          }}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+      {selectedActionItem && (
+        <ActionIntensitySheet
+          item={selectedActionItem}
+          initialQty={cart[selectedActionItem.id] || 1}
+          onClose={() => setSelectedActionItem(null)}
+          onConfirm={(quantity) => {
+            setQty(selectedActionItem.id, quantity);
+            setSelectedActionItem(null);
+            setStage("checkout");
+          }}
         />
       )}
     </div>
