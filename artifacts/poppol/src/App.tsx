@@ -1602,6 +1602,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
   const [pickerOpen, setPickerOpen] = useState(false);
   const [actionType, setActionType] = useState(null);
   const [selectedActionItem, setSelectedActionItem] = useState(null);
+  const [actionItemSource, setActionItemSource] = useState(null);
   const payTimer = useRef(null);
 
   useEffect(() => () => payTimer.current && clearTimeout(payTimer.current), []);
@@ -1865,10 +1866,14 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
                           role="button"
                           tabIndex={0}
                           aria-label={`Escolher intensidade para ${item.label}`}
-                          onClick={() => setSelectedActionItem(item)}
+                          onClick={() => {
+                            setActionItemSource("profile");
+                            setSelectedActionItem(item);
+                          }}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
+                              setActionItemSource("profile");
                               setSelectedActionItem(item);
                             }
                           }}
@@ -1933,6 +1938,7 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
           cart={cart}
           onSetQty={setQty}
           onSelect={(item) => {
+            setActionItemSource("picker");
             setSelectedActionItem(item);
             setPickerOpen(false);
           }}
@@ -1943,7 +1949,10 @@ const DetailModal = React.memo(function DetailModal({ p, onClose, onSend, onShar
         <ActionIntensitySheet
           item={selectedActionItem}
           initialQty={cart[selectedActionItem.id] || 1}
-          onClose={() => setSelectedActionItem(null)}
+          onClose={() => {
+            setSelectedActionItem(null);
+            if (actionItemSource === "picker") setPickerOpen(true);
+          }}
           onConfirm={(quantity) => {
             setQty(selectedActionItem.id, quantity);
             setSelectedActionItem(null);
