@@ -402,6 +402,63 @@ function computeTreemap(politicians, width, height) {
 
 /* --------------------------------- UI --------------------------------- */
 
+const ACTION_LEVEL_ORDER = ["light", "moderate", "strong", "apocalyptic"];
+
+function getActionProfile(item, quantity) {
+  const safeQuantity = Math.max(1, Number(quantity) || 1);
+  const level =
+    safeQuantity >= 60
+      ? "apocalyptic"
+      : safeQuantity >= 12
+        ? "strong"
+        : safeQuantity >= 4
+          ? "moderate"
+          : "light";
+  const profiles = {
+    light: {
+      level,
+      duration: 1050,
+      particleCount: 1,
+      waveCount: 1,
+      impactMultiplier: 0.68,
+      particleSize: 30,
+      spread: 0.15,
+      flash: false,
+    },
+    moderate: {
+      level,
+      duration: 1650,
+      particleCount: 3,
+      waveCount: 2,
+      impactMultiplier: 1,
+      particleSize: 38,
+      spread: 0.28,
+      flash: false,
+    },
+    strong: {
+      level,
+      duration: 2450,
+      particleCount: 7,
+      waveCount: 3,
+      impactMultiplier: 1.45,
+      particleSize: 48,
+      spread: 0.52,
+      flash: false,
+    },
+    apocalyptic: {
+      level,
+      duration: 4600,
+      particleCount: 16,
+      waveCount: 5,
+      impactMultiplier: 2.35,
+      particleSize: 64,
+      spread: 0.9,
+      flash: true,
+    },
+  };
+  return { ...profiles[level], itemPower: Math.max(1, item.value || 1), quantity: safeQuantity };
+}
+
 function ActionEffectsLayer({ effects, targetRects, onDone }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 45, pointerEvents: "none", overflow: "hidden" }} aria-live="polite">
@@ -410,12 +467,14 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
           const item = ITEMS.find((candidate) => candidate.id === effect.itemId) || ITEMS[0];
           const target = targetRects[effect.politicianId];
           if (!target) return null;
-          const intensity = Math.max(1, item.value * effect.quantity);
-          const count = Math.min(18, 4 + Math.ceil(intensity / 5));
+          const profile = getActionProfile(item, effect.quantity);
           const targetX = target.left + target.width / 2;
           const targetY = target.top + target.height / 2;
           const color = item.type === "apoio" ? "#4ADE80" : "#E2555F";
-          const impactSize = Math.min(340, Math.max(120, Math.max(target.width, target.height) * 0.9 + intensity * 2));
+          const impactSize = Math.min(
+            520,
+            Math.max(110, Math.max(target.width, target.height) * profile.impactMultiplier),
+          );
           return (
             <motion.div
               key={effect.id}
@@ -424,36 +483,39 @@ function ActionEffectsLayer({ effects, targetRects, onDone }) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
               onAnimationComplete={() => onDone(effect.id)}
-              style={{ position: "fixed", inset: 0 }}
+              className={`poppol-action-effect poppol-action-${profile.level}`}
+              style={{ position: "fixed", inset: 0, "--action-duration": `${profile.duration}ms`, "--action-color": color }}
             >
-              <span className="poppol-impact-wash" style={{ left: targetX, top: targetY, width: impactSize, height: impactSize, background: `radial-gradient(circle, ${color}30 0%, transparent 68%)` }} />
-              {[0, 1, 2].map((wave) => (
+              {profile.flash && <span className="poppol-apocalypse-flash" style={{ background: `${color}26` }} />}
+              <span className="poppol-impact-wash" style={{ left: targetX, top: targetY, width: impactSize, height: impactSize, background: `radial-gradient(circle, ${color}55 0%, ${color}1C 32%, transparent 70%)` }} />
+              {Array.from({ length: profile.waveCount }, (_, wave) => (
                 <span
                   key={wave}
                   className="poppol-impact-wave"
                   style={{
                     left: targetX,
                     top: targetY,
-                    width: impactSize * (0.48 + wave * 0.18),
-                    height: impactSize * (0.48 + wave * 0.18),
+                    width: impactSize * (0.35 + wave * 0.14),
+                    height: impactSize * (0.35 + wave * 0.14),
                     borderColor: `${color}${wave === 0 ? "CC" : "88"}`,
-                    animationDelay: `${wave * 180}ms`,
+                    animationDelay: `${wave * (profile.level === "apocalyptic" ? 240 : 150)}ms`,
                   }}
                 />
               ))}
               <span className="poppol-action-rain">
-                {Array.from({ length: count }, (_, index) => {
+                {Array.from({ length: profile.particleCount }, (_, index) => {
                   const drift = ((hashSeed(`${effect.id}-${index}`) % 100) - 50) / 100;
-                  const x = targetX + drift * Math.min(target.width * 0.9, 180);
-                  const dropY = targetY + (index % 3) * 8;
+                  const x = targetX + drift * Math.min(target.width * profile.spread, 260);
+                  const launchX = effect.originX + drift * (profile.level === "apocalyptic" ? 420 : 170);
+                  const launchY = effect.originY + (index % 4) * 44;
                   return (
                     <motion.span
                       key={index}
-                      initial={{ left: x, top: -72 - (index % 4) * 58, opacity: 0, scale: 0.62, rotate: -18 + (index % 5) * 9 }}
-                      animate={{ left: x + drift * 18, top: dropY, opacity: [0, 1, 1, 0], scale: [0.62, 1, 1, 0.76], rotate: 4 + drift * 20 }}
-                      transition={{ duration: 0.95 + (index % 4) * 0.12, delay: (index % 6) * 0.07, ease: [0.2, 0.8, 0.25, 1] }}
+                      initial={{ left: launchX, top: launchY, opacity: 0, scale: 0.35, rotate: -35 + (index % 5) * 14 }}
+                      animate={{ left: [launchX, x + drift * 24], top: [launchY, targetY + drift * 18], opacity: [0, 1, 1, 0], scale: [0.35, profile.level === "apocalyptic" ? 1.3 : 1, 1, 0.7], rotate: [0, 25 + drift * 40, 70 + drift * 30] }}
+                      transition={{ duration: profile.duration / 1000, delay: index * (profile.level === "apocalyptic" ? 0.12 : 0.08), ease: [0.16, 0.82, 0.24, 1], times: [0, 0.38, 0.82, 1] }}
                       className="poppol-rain-item"
-                      style={{ filter: `drop-shadow(0 3px 8px ${color}88)` }}
+                      style={{ color, fontSize: profile.particleSize, filter: `drop-shadow(0 4px ${profile.level === "apocalyptic" ? 18 : 8}px ${color}CC)` }}
                     >
                       {item.emoji}
                     </motion.span>
@@ -483,7 +545,7 @@ function TreemapCell({ rect, gap, onClick, cellRef, impacting }) {
     <button
       ref={cellRef}
       data-politician-id={p.id}
-      className={impacting ? "poppol-cell-impact" : undefined}
+      className={impacting ? `poppol-cell-impact poppol-cell-impact-${impacting}` : undefined}
       onClick={onClick}
       title={`${p.name} — ${p.role} — saldo ${formatScore(p.netScore)}`}
       style={{
@@ -2238,7 +2300,17 @@ export default function PopPolTreemap() {
   }, [politiciansWithTotals]);
 
   const rects = useMemo(() => computeTreemap(filtered, size.w, size.h), [filtered, size]);
-  const activeImpactIds = useMemo(() => new Set(effects.map((effect) => effect.politicianId)), [effects]);
+  const activeImpactLevels = useMemo(() => {
+    const levels = {};
+    for (const effect of effects) {
+      const item = ITEMS.find((candidate) => candidate.id === effect.itemId) || ITEMS[0];
+      const level = getActionProfile(item, effect.quantity).level;
+      if (!levels[effect.politicianId] || ACTION_LEVEL_ORDER.indexOf(level) > ACTION_LEVEL_ORDER.indexOf(levels[effect.politicianId])) {
+        levels[effect.politicianId] = level;
+      }
+    }
+    return levels;
+  }, [effects]);
   const [targetRects, setTargetRects] = useState({});
 
   const measureCells = useCallback(() => {
@@ -2252,9 +2324,14 @@ export default function PopPolTreemap() {
   }, []);
 
   useEffect(() => {
-    const frame = requestAnimationFrame(measureCells);
+    let frame = 0;
+    const trackTargets = () => {
+      measureCells();
+      if (effects.length > 0) frame = requestAnimationFrame(trackTargets);
+    };
+    frame = requestAnimationFrame(trackTargets);
     return () => cancelAnimationFrame(frame);
-  }, [rects, size, measureCells]);
+  }, [rects, size, effects.length, measureCells]);
 
   const enqueueAction = useCallback((event) => {
     if (!event?.id || !event.politicianId || !event.itemId || seenEventIds.current.has(event.id)) return;
@@ -2266,9 +2343,11 @@ export default function PopPolTreemap() {
       originY: typeof window !== "undefined" ? window.innerHeight + 70 : 870,
     };
     setEffects((current) => [...current.slice(-11), effect]);
+    const item = ITEMS.find((candidate) => candidate.id === event.itemId) || ITEMS[0];
+    const effectDuration = getActionProfile(item, effect.quantity).duration;
     window.setTimeout(() => {
       setEffects((current) => current.filter((candidate) => candidate.id !== event.id));
-    }, 1900);
+    }, effectDuration + 700);
   }, []);
 
   useEffect(() => {
@@ -2413,19 +2492,53 @@ export default function PopPolTreemap() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        @keyframes poppol-cell-impact {
+        @keyframes poppol-cell-impact-light {
           0%, 100% { transform: translate(0, 0) scale(1); filter: brightness(1); }
-          18% { transform: translate(-3px, 2px) scale(1.012); filter: brightness(1.3); }
-          36% { transform: translate(4px, -2px) scale(1.024); filter: brightness(1.12); }
-          54% { transform: translate(-2px, 1px) scale(1.012); }
+          35% { transform: translate(-2px, 1px) scale(1.008); filter: brightness(1.15); }
+          65% { transform: translate(2px, -1px) scale(1.004); }
         }
-        .poppol-cell-impact { animation: poppol-cell-impact 620ms cubic-bezier(.36,.07,.19,.97); z-index: 4; }
+        @keyframes poppol-cell-impact-moderate {
+          0%, 100% { transform: translate(0, 0) scale(1); filter: brightness(1); }
+          16% { transform: translate(-4px, 2px) scale(1.015); filter: brightness(1.3); }
+          32% { transform: translate(5px, -3px) scale(1.025); }
+          52% { transform: translate(-3px, 2px) scale(1.012); }
+          72% { transform: translate(2px, -1px) scale(1.006); }
+        }
+        @keyframes poppol-cell-impact-strong {
+          0%, 100% { transform: translate(0, 0) scale(1); filter: brightness(1); }
+          8% { transform: translate(-6px, 3px) scale(1.025); filter: brightness(1.55) saturate(1.25); }
+          18% { transform: translate(8px, -5px) scale(1.045); }
+          30% { transform: translate(-7px, 4px) scale(1.03); filter: brightness(1.25); }
+          48% { transform: translate(5px, -3px) scale(1.018); }
+          66% { transform: translate(-3px, 2px) scale(1.01); }
+        }
+        @keyframes poppol-cell-impact-apocalyptic {
+          0%, 100% { transform: translate(0, 0) scale(1); filter: brightness(1) saturate(1); }
+          5% { transform: translate(-10px, 5px) scale(1.055); filter: brightness(2) saturate(1.6); }
+          12% { transform: translate(13px, -8px) scale(1.1); }
+          22% { transform: translate(-11px, 7px) scale(1.07); filter: brightness(1.45) saturate(1.35); }
+          35% { transform: translate(9px, -5px) scale(1.045); }
+          50% { transform: translate(-7px, 4px) scale(1.025); }
+          68% { transform: translate(4px, -2px) scale(1.012); }
+        }
+        .poppol-cell-impact { z-index: 4; transform-origin: center; }
+        .poppol-cell-impact-light { animation: poppol-cell-impact-light 420ms cubic-bezier(.36,.07,.19,.97); }
+        .poppol-cell-impact-moderate { animation: poppol-cell-impact-moderate 760ms cubic-bezier(.36,.07,.19,.97); }
+        .poppol-cell-impact-strong { animation: poppol-cell-impact-strong 1280ms cubic-bezier(.36,.07,.19,.97); }
+        .poppol-cell-impact-apocalyptic { animation: poppol-cell-impact-apocalyptic 2600ms cubic-bezier(.36,.07,.19,.97); }
+        .poppol-action-effect { isolation: isolate; }
+        .poppol-apocalypse-flash {
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          animation: poppol-apocalypse-flash var(--action-duration) ease-out both;
+        }
         .poppol-impact-wash {
           position: absolute;
           transform: translate(-50%, -50%);
           border-radius: 50%;
           pointer-events: none;
-          animation: poppol-impact-wash 1100ms ease-out both;
+          animation: poppol-impact-wash var(--action-duration) ease-out both;
         }
         .poppol-impact-wave {
           position: absolute;
@@ -2433,15 +2546,25 @@ export default function PopPolTreemap() {
           border: 2px solid;
           border-radius: 50%;
           box-sizing: border-box;
-          animation: poppol-impact-wave 980ms cubic-bezier(.16,.8,.24,1) both;
+          animation: poppol-impact-wave var(--action-duration) cubic-bezier(.16,.8,.24,1) both;
         }
         .poppol-action-rain { position: absolute; inset: 0; }
         .poppol-rain-item {
           position: absolute;
           transform: translate(-50%, -50%);
-          font-size: clamp(24px, 3.4vw, 54px);
           line-height: 1;
-          will-change: top, left, transform, opacity;
+          will-change: top, left, transform, opacity, filter;
+        }
+        .poppol-action-light .poppol-rain-item { filter: grayscale(.1); }
+        .poppol-action-moderate .poppol-rain-item { text-shadow: 0 0 12px var(--action-color); }
+        .poppol-action-strong .poppol-rain-item { text-shadow: 0 0 18px var(--action-color), 0 0 32px var(--action-color); }
+        .poppol-action-apocalyptic .poppol-rain-item { text-shadow: 0 0 22px var(--action-color), 0 0 44px var(--action-color); }
+        @keyframes poppol-apocalypse-flash {
+          0%, 100% { opacity: 0; }
+          5% { opacity: 1; }
+          12% { opacity: .15; }
+          19% { opacity: .75; }
+          32% { opacity: 0; }
         }
         @keyframes poppol-impact-wash {
           0% { opacity: 0; transform: translate(-50%, -50%) scale(.55); }
@@ -2504,7 +2627,7 @@ export default function PopPolTreemap() {
                 if (node) cellNodes.current.set(rect.item.id, node);
                 else cellNodes.current.delete(rect.item.id);
               }}
-              impacting={activeImpactIds.has(rect.item.id)}
+              impacting={activeImpactLevels[rect.item.id] || false}
               onClick={() => setSelectedId(rect.item.id)}
             />
           ))
