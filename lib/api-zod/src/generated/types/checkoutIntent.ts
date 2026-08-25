@@ -14,4 +14,5 @@ export interface CheckoutIntent {
   amountCents: number;
   status: CheckoutIntentStatus;
   expiresAt: Date;
+  checkoutUrl: string;
 }

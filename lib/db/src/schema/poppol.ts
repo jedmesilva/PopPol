@@ -17,6 +17,7 @@ export const poppolItemsTable = pgTable("poppol_items", {
   hint: text("hint").notNull(),
   weight: integer("weight").notNull(),
   priceCents: integer("price_cents").notNull(),
+  stripePriceId: text("stripe_price_id"),
 });
 
 export const poppolPoliticiansTable = pgTable("poppol_politicians", {

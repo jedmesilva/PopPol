@@ -242,7 +242,8 @@ components:
         amountCents: { type: number }
         status: { type: string, enum: [pending, paid, expired, canceled] }
         expiresAt: { type: string, format: date-time }
-      required: [id, checkoutToken, politicianId, amountCents, status, expiresAt]
+        checkoutUrl: { type: string }
+      required: [id, checkoutToken, politicianId, amountCents, status, expiresAt, checkoutUrl]
     Manifestation:
       type: object
       properties:

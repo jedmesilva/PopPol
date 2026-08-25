@@ -4,8 +4,23 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { rateLimit } from "./middlewares/rate-limit";
+import { WebhookHandlers } from "./webhookHandlers";
 
 const app: Express = express();
+
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async (req, res): Promise<void> => {
+  const signature = req.headers["stripe-signature"];
+  if (!signature || Array.isArray(signature)) {
+    res.status(400).json({ error: "Missing stripe-signature" });
+    return;
+  }
+  try {
+    await WebhookHandlers.processWebhook(req.body as Buffer, signature);
+    res.status(200).json({ received: true });
+  } catch {
+    res.status(400).json({ error: "Webhook processing error" });
+  }
+});
 
 app.use(
   pinoHttp({

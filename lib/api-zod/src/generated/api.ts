@@ -174,7 +174,8 @@ export const CreateCheckoutIntentResponse = zod.object({
   "politicianId": zod.string(),
   "amountCents": zod.number(),
   "status": zod.enum(['pending', 'paid', 'expired', 'canceled']),
-  "expiresAt": zod.coerce.date()
+  "expiresAt": zod.coerce.date(),
+  "checkoutUrl": zod.string()
 })
 
 

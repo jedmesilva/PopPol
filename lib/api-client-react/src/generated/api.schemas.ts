@@ -132,6 +132,7 @@ export interface CheckoutIntent {
   amountCents: number;
   status: CheckoutIntentStatus;
   expiresAt: string;
+  checkoutUrl: string;
 }
 
 export interface Manifestation {

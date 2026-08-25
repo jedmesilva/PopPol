@@ -3,7 +3,7 @@
 // @ts-nocheck
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Search, MapPin, X, SlidersHorizontal, ChevronDown, Share2, ShoppingBag, ArrowLeft, CreditCard, Minus, Plus, Loader2, Trash2, LayoutGrid, TrendingUp, TrendingDown } from "lucide-react";
-import { useCreateManifestation, useGetPolitician, useListPoliticians } from "@workspace/api-client-react";
+import { useGetPolitician, useListPoliticians } from "@workspace/api-client-react";
 
 /* ------------------------------------------------------------------
    PopPol — Popularidade Política — Grid dominante (treemap)
@@ -1898,7 +1898,6 @@ export default function PopPolTreemap() {
   const selectedQuery = useGetPolitician(selectedIdForQuery, {
     query: { queryKey: ["/api/politicians", selectedIdForQuery], enabled: Boolean(selectedId) },
   });
-  const createManifestation = useCreateManifestation();
   const [size, setSize] = useState({
     w: typeof window !== "undefined" ? window.innerWidth : 1200,
     h: typeof window !== "undefined" ? window.innerHeight : 800,
@@ -1954,24 +1953,22 @@ export default function PopPolTreemap() {
   // "aprovado" no checkout — cartEntries é a sacola inteira, com
   // todos os itens (de apoio e/ou crítica) e quantidades escolhidos.
   const handleSend = async (p, cartEntries) => {
-    await Promise.all(
-      cartEntries.map(({ item, qty }) =>
-        createManifestation.mutateAsync({
-          id: p.id,
-          data: { itemId: item.id, quantity: qty },
-        }),
-      ),
-    );
-    await Promise.all([
-      politiciansQuery.refetch(),
-      selectedQuery.refetch(),
-    ]);
-    const itemsCount = cartEntries.reduce((sum, e) => sum + e.qty, 0);
-    const totalCents = cartEntries.reduce((sum, e) => sum + e.item.priceCents * e.qty, 0);
-    const delta = cartEntries.reduce((sum, e) => sum + TYPE_META[e.item.type].sign * e.item.value * e.qty, 0);
-    showToast(
-      `Pagamento aprovado — ${itemsCount} ${itemsCount === 1 ? "item enviado" : "itens enviados"} para ${p.name} · ${formatBRL(totalCents)} · popularidade ${formatScore(delta)}`
-    );
+    const response = await fetch("/api/checkout-intents", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        politicianId: p.id,
+        items: cartEntries.map(({ item, qty }) => ({ itemId: item.id, quantity: qty })),
+      }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || "Não foi possível iniciar o checkout.");
+    }
+    const checkout = await response.json();
+    if (!checkout.checkoutUrl) throw new Error("O checkout não retornou uma URL válida.");
+    window.location.assign(checkout.checkoutUrl);
   };
 
   const handleShare = (p) => {
